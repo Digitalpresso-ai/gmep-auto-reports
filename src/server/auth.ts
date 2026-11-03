@@ -136,10 +136,3 @@ export async function logoutAdmin(req: Request): Promise<void> {
   const token = readCookie(req, ADMIN_COOKIE);
   if (token) await db()`delete from admin_sessions where token_hash = ${hashToken(token)}`;
 }
-
-export async function setAdminPassword(password: string): Promise<void> {
-  const hash = await hashPassword(password);
-  await db()`insert into admins (id, password_hash) values (1, ${hash})
-             on conflict (id) do update set password_hash = excluded.password_hash, failed_count = 0, locked_until = null, updated_at = now()`;
-  await db()`delete from admin_sessions`;
-}

@@ -13,7 +13,8 @@
     "test:db": "vitest run tests/db",
     "db:migrate": "node db/migrate.ts",
     "check": "npm run lint && npm run typecheck && npm test",
-    "test:api": "vitest run tests/api"
+    "test:api": "vitest run tests/api",
+    "admin:password": "node scripts/set-admin-password.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",
