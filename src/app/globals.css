@@ -253,3 +253,22 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .secret { font-family: ui-monospace, Menlo, monospace; font-size: 18px; letter-spacing: 0.06em; background: var(--surface-subtle); color: var(--dp-brand); padding: 8px 12px; border-radius: var(--radius-md); display: inline-block; user-select: all; }
+.row-end { justify-content: flex-end; }
+.work-admin { grid-template-columns: 300px 1fr; }
+@media (max-width: 1000px) {
+  .work-admin { grid-template-columns: 1fr; }
+  /* 휴대폰에서는 날짜 목록이 편집 영역을 밀어내지 않도록 높이를 제한한다 */
+  .day-list { max-height: 216px; overflow-y: auto; }
+}
+/* 휴대폰에서는 회사 표를 행마다 카드로 보여 준다 */
+@media (max-width: 640px) {
+  .table-stack thead { display: none; }
+  .table-stack, .table-stack tbody, .table-stack tr, .table-stack td { display: block; width: 100%; }
+  .table-stack tr { border: 1px solid var(--border-card); border-radius: var(--radius-md); padding: 6px 12px; margin-bottom: 8px; background: var(--surface-card); }
+  .table-stack td { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 0; text-align: right; }
+  .table-stack td[data-label]::before { content: attr(data-label); color: var(--text-muted); font-size: 13px; font-weight: 600; text-align: left; flex-shrink: 0; }
+  .table-stack td.actions-cell { padding-top: 8px; }
+  .table-stack td.actions-cell .row { width: 100%; }
+  .table-stack td.actions-cell .btn { flex: 1; }
+}
+.drive-link { margin-bottom: 10px; }

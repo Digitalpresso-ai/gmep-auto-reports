@@ -62,18 +62,18 @@ export function Companies() {
       </form>
       {error && <div className="msg msg-err">{error}</div>}
       <div className="table-wrap" style={{ marginTop: 16 }}>
-        <table className="table">
+        <table className="table table-stack">
           <thead>
             <tr><th>로그인 표시명</th><th>등록 이름</th><th>상태</th><th /></tr>
           </thead>
           <tbody>
             {rows?.map((r) => (
               <tr key={r.id}>
-                <td><b>{r.label}</b></td>
-                <td>{r.name}</td>
-                <td>{state(r)}</td>
-                <td>
-                  <div className="row" style={{ justifyContent: "flex-end" }}>
+                <td data-label="로그인 표시명"><b>{r.label}</b></td>
+                <td data-label="등록 이름">{r.name}</td>
+                <td data-label="상태">{state(r)}</td>
+                <td className="actions-cell">
+                  <div className="row row-end">
                     <button type="button" className="btn btn-small" onClick={() => rename(r)}>이름 수정</button>
                     <button type="button" className="btn btn-small" onClick={() => issue(r)}>{r.hasPassword ? "비밀번호 재발급" : "초기 비밀번호 발급"}</button>
                   </div>

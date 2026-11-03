@@ -55,11 +55,11 @@ export function AdminApp() {
         </div>
         {view === "companies" && <Companies />}
         {view === "days" && (
-          <div className="work" style={{ gridTemplateColumns: "300px 1fr" }}>
+          <div className="work work-admin">
             <section className="card">
               <h2>보고 일자</h2>
               <input className="input" type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
-              <ul className="files">
+              <ul className="files day-list">
                 {listed.map((d) => (
                   <li key={d.date} style={{ cursor: "pointer", outline: d.date === date ? "2px solid var(--dp-brand)" : undefined }} onClick={() => setDate(d.date)}>
                     <b>{fmtDate(d.date)}</b>
