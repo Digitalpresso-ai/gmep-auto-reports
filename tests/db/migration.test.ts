@@ -18,7 +18,7 @@ afterAll(async () => {
 
 describe("DATA-1 스키마", () => {
   it("migration을 순서대로 적용하고 두 번째 실행은 아무것도 적용하지 않는다", async () => {
-    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql", "0005_photo_descriptions.sql"]);
+    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql", "0005_photo_descriptions.sql", "0006_report_revisions.sql"]);
     expect(await migrate(sql)).toEqual([]);
   });
 
@@ -41,7 +41,7 @@ describe("DATA-1 스키마", () => {
       where relnamespace = 'public'::regnamespace and relkind = 'r' and relname <> 'schema_migrations'`;
     expect(rows.map((r) => r.relname).sort()).toEqual([
       "admin_sessions", "admins", "ai_inflight", "ai_usage", "app_settings", "companies", "company_photos",
-      "drafts", "login_attempts", "reports", "sessions", "shared_days", "shared_files", "shared_materials",
+      "drafts", "login_attempts", "report_revisions", "reports", "sessions", "shared_days", "shared_files", "shared_materials",
     ]);
     expect(rows.filter((r) => !r.relrowsecurity)).toEqual([]);
   });
@@ -119,5 +119,16 @@ describe("FUNC-1·FUNC-5 원본 파일 경로", () => {
     await expect(
       sql`insert into shared_materials (report_date, kind, filename, text_content, storage_path) values ('2026-11-04', 'education', 'a.pdf', 't', 'shared/2026-11-05/materials/a.pdf')`,
     ).rejects.toThrow(/shared_materials_storage_path_check/);
+  });
+});
+
+describe("FUNC-10 수정 대화", () => {
+  it("보고서를 지우면 그 보고서의 수정 대화도 지운다", async () => {
+    const [a] = await sql`select id from companies where name = 'A사'`;
+    const [r] = await sql`insert into reports (company_id, report_date) values (${a.id}, '2026-11-09') returning id`;
+    await sql`insert into report_revisions (report_id, request, reply) values (${r.id}, '시사점을 더 구체적으로', '시사점 2개를 바꿨습니다')`;
+    await expect(sql`insert into report_revisions (report_id, request) values (${r.id}, '')`).rejects.toThrow(/report_revisions_request_check/);
+    await sql`delete from reports where id = ${r.id}`;
+    expect(await sql`select 1 from report_revisions where report_id = ${r.id}`).toHaveLength(0);
   });
 });
