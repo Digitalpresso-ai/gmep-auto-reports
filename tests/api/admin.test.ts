@@ -87,6 +87,27 @@ describe("AUTH-9 회사 추가·이름 수정·초기 비밀번호 발급", () =
     const r = await login.POST(request("POST", "/api/auth/login", { body: { companyId: c.id, password } }));
     expect(await r.json()).toEqual({ mustChangePassword: true });
   });
+
+  it("비밀번호가 없는 회사에만 한 번에 발급하고 회사 이름과 함께 돌려준다", async () => {
+    const before = await t.sql<{ id: string; name: string; password_hash: string | null }[]>`select id, name, password_hash from companies`;
+    const without = before.filter((c) => !c.password_hash);
+    expect(without.length).toBeGreaterThan(0);
+    const { POST } = await import("@/app/api/admin/companies/passwords/route");
+    expect((await POST(request("POST", "/x"))).status).toBe(401);
+    const res = await POST(request("POST", "/x", { cookie: admin }));
+    expect(res.status).toBe(200);
+    const { issued } = await res.json();
+    expect(issued.map((i: { id: string }) => i.id).sort()).toEqual(without.map((c) => c.id).sort());
+    expect(issued[0]).toEqual({ id: expect.any(String), name: expect.any(String), label: expect.any(String), password: expect.stringMatching(/^[A-Za-z0-9]{10}$/) });
+
+    const after = await t.sql<{ id: string; password_hash: string }[]>`select id, password_hash from companies`;
+    for (const c of before.filter((c) => c.password_hash)) expect(after.find((a) => a.id === c.id)!.password_hash).toBe(c.password_hash);
+    const login = await import("@/app/api/auth/login/route");
+    const r = await login.POST(request("POST", "/api/auth/login", { body: { companyId: issued[0].id, password: issued[0].password } }));
+    expect(await r.json()).toEqual({ mustChangePassword: true });
+
+    expect(await (await POST(request("POST", "/x", { cookie: admin }))).json()).toEqual({ issued: [] });
+  });
 });
 
 describe("SHARED-1 날짜별 공통 자료 등록", () => {

@@ -70,9 +70,10 @@ export async function renameCompany(id: string, name: string): Promise<"ok" | "n
 // 혼동하기 쉬운 0·O·1·l·I를 뺀 문자로 초기 비밀번호를 만든다
 const PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
+const newPassword = () => Array.from(randomBytes(10), (b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length]).join("");
+
 export async function issueInitialPassword(id: string): Promise<string | null> {
-  const bytes = randomBytes(10);
-  const password = Array.from(bytes, (b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length]).join("");
+  const password = newPassword();
   const hash = await hashPassword(password);
   const sql = db();
   const ok = await sql.begin(async (tx) => {
@@ -83,4 +84,18 @@ export async function issueInitialPassword(id: string): Promise<string | null> {
     return true;
   });
   return ok ? password : null;
+}
+
+// 비밀번호가 아직 없는 회사에만 발급한다. 그사이 다른 관리자가 발급한 회사는 update 조건에서 빠진다.
+export async function issueMissingPasswords() {
+  const sql = db();
+  const targets = (await listCompaniesForAdmin()).filter((c) => !c.hasPassword);
+  const issued = [];
+  for (const c of targets) {
+    const password = newPassword();
+    const rows = await sql`update companies set password_hash = ${await hashPassword(password)}, must_change_password = true, updated_at = now()
+                           where id = ${c.id} and password_hash is null returning id`;
+    if (rows.length) issued.push({ id: c.id, name: c.name, label: c.label, password });
+  }
+  return issued;
 }
