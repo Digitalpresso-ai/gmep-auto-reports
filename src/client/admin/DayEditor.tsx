@@ -13,6 +13,8 @@ type SharedDay = {
 type Progress = { done: number; total: number; current: string };
 type Result = { counts: Record<Exclude<FileKind, "ignore">, number>; failed: string[]; skipped: string[] };
 
+const DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1jvtDdOoi5qedcIBKPUB3Y4uF8xEhAiBv";
+
 const KIND_LABEL: Record<Exclude<FileKind, "ignore">, string> = { photo: "사진", schedule_image: "일정 이미지", schedule: "일정 문서", education: "교육자료" };
 
 // A2 공통 자료 편집 · A3 처리 중 · A4 일부 실패
@@ -151,6 +153,10 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     <div className="card">
       <h2>{fmtDate(date)} 공통 자료</h2>
       <p className="sub">여기 등록한 일정·교육자료·사진은 모든 회사가 같은 날짜를 고르면 함께 씁니다.</p>
+      {/* 드라이브 자료를 서버가 직접 가져오지 않는다. 운영자가 폴더를 열어 내려받은 뒤 아래에 넣는다. */}
+      <a className="btn btn-small btn-block drive-link" href={DRIVE_FOLDER_URL} target="_blank" rel="noreferrer">
+        구글 드라이브 공유 폴더 열기 ↗
+      </a>
       {drop("구글 드라이브 그날 폴더 ZIP 또는 여러 파일을 한 번에 넣기 (사진·일정·교육자료 자동 분류, 동영상 제외)", ".zip,.pdf,.pptx,.docx,.txt,.md,image/*")}
       {progress && (
         <div className="msg msg-info">
