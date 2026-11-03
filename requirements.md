@@ -19,7 +19,7 @@
 | AUTH-7 | 세션은 httpOnly·Secure 쿠키, 유효기간 14일, 로그아웃 버튼 | p.2 §2 | 1차 | `src/server/auth.ts`, `src/server/http.ts` / `tests/api/auth.test.ts` | 검증됨(Secure는 production에서만 붙음) |
 | AUTH-8 | 회사 계정은 자기 회사의 회사정보·기안문·보고서·사진만 조회·수정. 다른 회사 id를 넣은 API 직접 호출도 거부 | p.2 §2, p.5 §5-3, p.5 §6-2 | 1차 | `requireCompany`(세션 company_id만 사용), `resolvePhotos` / `tests/api/company.test.ts`, `report.test.ts`, `docx.test.ts`, `admin.test.ts` | 검증됨 |
 | AUTH-9 | 관리자 권한: 회사 추가·수정, 비밀번호 초기화, 회사별 AI 사용량·한도 조정, 전체 사용량 조회. 회사 추가는 관리자 페이지에서 쉽게(1차) | p.2 §2, 2026-11-03 사용자 인터뷰("쉽게 추가할 수 있게 관리자 페이지 필요") | 1차(회사 추가)·2차(나머지) | `src/app/api/admin/companies`, `src/client/admin/Companies.tsx` / `tests/api/admin.test.ts` | 구현 중(1차 회사 추가·이름 수정·비밀번호 발급·미발급 회사 일괄 발급 검증됨, 한도 조정·사용량 조회는 2차) |
-| AUTH-10 | 관리자도 회사별 보고서·사진·기안문 내용은 열람 불가(목록·건수만) | p.2 §2 | 2차 | `listCompaniesForAdmin`(내용 필드 없음) / `tests/api/admin.test.ts` | 검증됨(관리자 API에 내용 조회 없음). 건수 화면은 2차 |
+| AUTH-10 | 관리자도 회사별 보고서·사진·기안문 내용은 열람 불가(목록·건수만) | p.2 §2 | 2차 | `listCompaniesForAdmin`(내용 필드 없음) / `tests/api/admin.test.ts` | 검증됨(관리자 API에 내용 조회 없음). 건수 화면은 2차. 한계: 관리자는 비밀번호 재발급(AUTH-6)으로 받은 초기 비밀번호로 회사 계정에 로그인해 내용을 볼 수 있다. 회사는 다음 로그인 실패로만 알게 된다(2026-11-04 점검, 사용자 결정으로 한계로 둠) |
 
 ## 보고서 작성 기능
 
