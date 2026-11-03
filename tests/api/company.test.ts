@@ -94,7 +94,7 @@ describe("SHARED-2·3 작성 화면 데이터", () => {
     expect(body.schedule).toEqual({ text: "09:30 온보딩", edited: false });
     expect(body.photos).toEqual([expect.objectContaining({ source: "shared", filename: "p1.jpg", url: expect.stringContaining("signed") })]);
     expect(body.scheduleImages).toHaveLength(1);
-    expect(body.materials).toEqual([{ kind: "education", filename: "강의.pdf", chars: 8 }]);
+    expect(body.materials).toEqual([{ id: expect.any(String), kind: "education", filename: "강의.pdf", chars: 8, hasOriginal: false }]);
     expect(body.usage).toEqual({ generateUsed: 0, generateLimit: 5, generateRemaining: 5, tokenLimitReached: false });
     expect(body.report).toBeNull();
   });

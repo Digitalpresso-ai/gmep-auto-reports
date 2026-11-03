@@ -137,3 +137,48 @@ describe("SHARED-1 날짜별 공통 자료 등록", () => {
     expect((await PUT(request("PUT", "/x", { cookie: admin, body: { scheduleText: "x" } }), params({ date: "2026-13-40" }))).status).toBe(400);
   });
 });
+
+describe("FUNC-5 교육자료 원본 보관", () => {
+  const date = "2026-11-06";
+  const uploadUrl = async (body: unknown, cookie = admin) =>
+    (await import("@/app/api/admin/days/[date]/materials/upload-url/route")).POST(request("POST", "/x", { cookie, body }), params({ date }));
+  const addMaterial = async (body: unknown) =>
+    (await import("@/app/api/admin/days/[date]/materials/route")).POST(request("POST", "/x", { cookie: admin, body }), params({ date }));
+
+  it("그 날짜 자료 폴더의 서명 업로드 URL을 관리자에게만 준다", async () => {
+    const res = await uploadUrl({ filename: "강의.pptx", size: 30 * 1024 * 1024 });
+    expect(res.status).toBe(200);
+    expect((await res.json()).storagePath).toMatch(/^shared\/2026-11-06\/materials\/[0-9a-f-]+\.pptx$/);
+    expect((await uploadUrl({ filename: "강의.pptx", size: 10 }, "")).status).toBe(401);
+  });
+
+  it("다른 날짜 폴더 경로는 거부하고, 맞는 경로는 텍스트와 함께 저장한다", async () => {
+    expect((await addMaterial({ kind: "education", filename: "a.pdf", text: "내용", storagePath: "shared/2026-11-07/materials/00000000-0000-0000-0000-000000000000.pdf" })).status).toBe(400);
+    const { storagePath } = await (await uploadUrl({ filename: "a.pdf", size: 100 })).json();
+    objects.set(storagePath, { bytes: new Uint8Array([1]), contentType: "application/pdf" });
+    expect((await addMaterial({ kind: "education", filename: "a.pdf", text: "내용", storagePath })).status).toBe(201);
+    const day = await (await (await import("@/app/api/admin/days/[date]/route")).GET(request("GET", "/x", { cookie: admin }), params({ date }))).json();
+    expect(day.materials[0]).toMatchObject({ filename: "a.pdf", hasOriginal: true });
+  });
+
+  it("로그인한 회사는 그날 교육자료 원본을 내려받고, 세션이 없으면 401이다", async () => {
+    const [m] = await t.sql`select id, storage_path from shared_materials where report_date = ${date}`;
+    const id = await companyWithPassword(t.sql, "주식회사 마이렌", "myren-pass");
+    const cookie = await loginCookie(id, "myren-pass");
+    const route = await import("@/app/api/days/[date]/materials/[id]/file/route");
+    const res = await route.GET(request("GET", "/x", { cookie }), params({ date, id: m.id }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).url).toContain(m.storage_path);
+    expect((await route.GET(request("GET", "/x", { cookie }), params({ date: "2026-11-02", id: m.id }))).status).toBe(404);
+    expect((await route.GET(request("GET", "/x"), params({ date, id: m.id }))).status).toBe(401);
+    const view = await (await (await import("@/app/api/days/[date]/route")).GET(request("GET", "/x", { cookie }), params({ date }))).json();
+    expect(view.materials[0]).toMatchObject({ id: m.id, hasOriginal: true });
+  });
+
+  it("관리자가 자료를 지우면 원본도 지운다", async () => {
+    const [m] = await t.sql`select id, storage_path from shared_materials where report_date = ${date}`;
+    const mats = await import("@/app/api/admin/days/[date]/materials/[id]/route");
+    expect((await mats.DELETE(request("DELETE", "/x", { cookie: admin }), params({ date, id: m.id }))).status).toBe(200);
+    expect(objects.has(m.storage_path)).toBe(false);
+  });
+});

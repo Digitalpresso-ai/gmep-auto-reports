@@ -51,7 +51,7 @@ export function CompanyInfo({ profile, onSaved, onCancel }: { profile: Profile; 
   async function downloadOriginal() {
     try {
       const { url } = await api<{ url: string }>("/api/company/proposal/file");
-      window.open(url, "_blank", "noopener");
+      window.location.assign(url);
     } catch (e) {
       setStatus({ kind: "err", text: errorText(e) });
     }

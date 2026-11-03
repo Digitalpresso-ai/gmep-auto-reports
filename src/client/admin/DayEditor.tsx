@@ -2,13 +2,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { classifyFile, extOf, type FileKind } from "@/lib/classify";
 import { api, errorText, fmtDate } from "../api";
-import { extractText, imageForm, toJpeg, unzip } from "../files";
+import { extractText, imageForm, toJpeg, unzip, uploadOriginal } from "../files";
 
 type SharedDay = {
   date: string;
   scheduleText: string;
   files: { id: string; kind: "photo" | "schedule_image"; filename: string; url: string }[];
-  materials: { id: string; kind: "schedule" | "education"; filename: string; chars: number }[];
+  materials: { id: string; kind: "schedule" | "education"; filename: string; chars: number; hasOriginal: boolean }[];
 };
 type Progress = { done: number; total: number; current: string };
 type Result = { counts: Record<Exclude<FileKind, "ignore">, number>; failed: string[]; skipped: string[] };
@@ -58,14 +58,25 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     }
   }
 
-  async function processOne(f: File, kind: Exclude<FileKind, "ignore">) {
+  // 문서는 텍스트를 저장하고 원본도 Storage에 보관한다. 원본 보관만 실패하면 경고를 돌려준다.
+  async function processOne(f: File, kind: Exclude<FileKind, "ignore">): Promise<string | null> {
     if (kind === "photo" || kind === "schedule_image") {
       const img = await toJpeg(f, kind === "photo" ? 1100 : 1600);
       await api(`/api/admin/days/${date}/files`, { form: imageForm(img, f.name, { kind }) });
-    } else {
-      const text = await extractText(f);
-      await api(`/api/admin/days/${date}/materials`, { body: { kind, filename: f.name, text } });
+      return null;
     }
+    const text = await extractText(f);
+    let storagePath: string | null = null;
+    let warning: string | null = null;
+    try {
+      const u = await api<{ storagePath: string; uploadUrl: string }>(`/api/admin/days/${date}/materials/upload-url`, { body: { filename: f.name, size: f.size } });
+      await uploadOriginal(u.uploadUrl, f);
+      storagePath = u.storagePath;
+    } catch (e) {
+      warning = `${f.name}: 텍스트는 저장했지만 원본은 보관하지 못했습니다(${errorText(e)})`;
+    }
+    await api(`/api/admin/days/${date}/materials`, { body: { kind, filename: f.name, text, storagePath } });
+    return warning;
   }
 
   // forced가 있으면 그 칸에 넣고, 없으면 FUNC-3 규칙으로 나눈다. ZIP은 브라우저에서 푼다.
@@ -93,8 +104,9 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
         continue;
       }
       try {
-        await processOne(f, kind);
+        const warning = await processOne(f, kind);
         r.counts[kind]++;
+        if (warning) r.failed.push(warning);
       } catch (e) {
         r.failed.push(`${f.name}: ${errorText(e)}`);
       }
@@ -103,6 +115,15 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     setResult(r);
     await reload().catch(() => {});
     onChanged();
+  }
+
+  async function download(id: string) {
+    try {
+      const { url } = await api<{ url: string }>(`/api/admin/days/${date}/materials/${id}/file`);
+      window.location.assign(url);
+    } catch (e) {
+      setError(errorText(e));
+    }
   }
 
   async function remove(path: string) {
@@ -176,19 +197,25 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
               {day?.materials.filter((m) => m.kind === "schedule").map((m) => (
                 <li key={m.id}>
                   <span>{m.filename} <span className="meta">{m.chars.toLocaleString()}자</span></span>
-                  <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/materials/${m.id}`)}>삭제</button>
+                  <span className="row">
+                    {m.hasOriginal && <button type="button" className="btn-link" onClick={() => download(m.id)}>원본</button>}
+                    <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/materials/${m.id}`)}>삭제</button>
+                  </span>
                 </li>
               ))}
             </ul>
           </div>
           <div className="field">
-            <span>교육자료 (텍스트만 저장, 원본 파일은 저장하지 않음)</span>
+            <span>교육자료 (AI에는 추출 텍스트를 보내고 원본은 보관)</span>
             {drop("PDF·PPTX·DOCX 추가", ".pdf,.pptx,.docx,.txt,.md", "education")}
             <ul className="files">
               {day?.materials.filter((m) => m.kind === "education").map((m) => (
                 <li key={m.id}>
                   <span>{m.filename} <span className="meta">{m.chars.toLocaleString()}자</span></span>
-                  <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/materials/${m.id}`)}>삭제</button>
+                  <span className="row">
+                    {m.hasOriginal && <button type="button" className="btn-link" onClick={() => download(m.id)}>원본</button>}
+                    <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/materials/${m.id}`)}>삭제</button>
+                  </span>
                 </li>
               ))}
             </ul>

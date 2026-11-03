@@ -20,7 +20,7 @@ export type DayView = {
   draftSaved: boolean;
   schedule: { text: string; edited: boolean };
   scheduleImages: { id: string; url: string; filename: string }[];
-  materials: { kind: "schedule" | "education"; filename: string; chars: number }[];
+  materials: { id: string; kind: "schedule" | "education"; filename: string; chars: number; hasOriginal: boolean }[];
   photos: PhotoView[];
   selectedPhotos: PhotoRef[];
   notes: string;
@@ -53,7 +53,7 @@ export async function getDayView(companyId: string, date: string): Promise<DayVi
     draftSaved: draft !== null,
     schedule: draft?.schedule_text != null ? { text: draft.schedule_text, edited: true } : { text: shared?.scheduleText ?? "", edited: false },
     scheduleImages: (shared?.files ?? []).filter((f) => f.kind === "schedule_image").map((f) => ({ id: f.id, url: f.url, filename: f.filename })),
-    materials: (shared?.materials ?? []).map((m) => ({ kind: m.kind, filename: m.filename, chars: m.chars })),
+    materials: shared?.materials ?? [],
     photos: [
       ...sharedPhotos.map((f) => ({ source: "shared" as const, id: f.id, filename: f.filename, width: f.width, height: f.height, url: f.url })),
       ...own.map((p) => ({ source: "company" as const, id: p.id, filename: p.filename, width: p.width, height: p.height, url: ownUrls.get(p.storage_path) ?? "" })),

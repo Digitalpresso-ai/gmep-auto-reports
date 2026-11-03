@@ -265,6 +265,15 @@ export function Workspace({ profile }: { profile: Profile }) {
     }
   }
 
+  async function downloadMaterial(id: string) {
+    try {
+      const { url } = await api<{ url: string }>(`/api/days/${date}/materials/${id}/file`);
+      window.location.assign(url);
+    } catch (e) {
+      setStatus({ kind: "err", text: errorText(e) });
+    }
+  }
+
   async function downloadWord() {
     if (!(await flushReport())) return;
     // 서버가 첨부 파일로 내려주므로 링크를 눌러 받는다(아이폰 Safari도 저장 창을 띄운다)
@@ -344,7 +353,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                       </li>
                     ))}
                     {schedMaterials.map((m) => (
-                      <li key={m.filename}>
+                      <li key={m.id}>
                         <span>{m.filename}</span>
                         <span className="meta">{m.chars.toLocaleString()}자</span>
                       </li>
@@ -360,9 +369,15 @@ export function Workspace({ profile }: { profile: Profile }) {
                 {eduMaterials.length ? (
                   <ul className="files">
                     {eduMaterials.map((m) => (
-                      <li key={m.filename}>
+                      <li key={m.id}>
                         <span>{m.filename}</span>
-                        <span className="meta">{m.chars.toLocaleString()}자</span>
+                        {m.hasOriginal ? (
+                          <button type="button" className="btn-link" onClick={() => downloadMaterial(m.id)}>
+                            원본 받기
+                          </button>
+                        ) : (
+                          <span className="meta">{m.chars.toLocaleString()}자</span>
+                        )}
                       </li>
                     ))}
                   </ul>

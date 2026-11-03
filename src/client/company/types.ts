@@ -21,7 +21,7 @@ export type DayView = {
   draftSaved: boolean;
   schedule: { text: string; edited: boolean };
   scheduleImages: { id: string; url: string; filename: string }[];
-  materials: { kind: "schedule" | "education"; filename: string; chars: number }[];
+  materials: { id: string; kind: "schedule" | "education"; filename: string; chars: number; hasOriginal: boolean }[];
   photos: PhotoView[];
   selectedPhotos: PhotoRef[];
   notes: string;
