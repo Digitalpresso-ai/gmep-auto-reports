@@ -10,6 +10,7 @@ type DraftPatch = { scheduleText?: string; selectedPhotos?: PhotoRef[]; notes?: 
 type Status = { kind: "err" | "ok" | "info" | "warn"; text: string; retry?: boolean } | null;
 
 const AUTO_SELECT_MAX = 4;
+const MAX_SELECTED = 30;
 const sameRef = (a: PhotoRef, b: PhotoRef) => a.source === b.source && a.id === b.id;
 
 // H0 작성 화면 → E1/E2 입력 → G1 생성 중 / G2 실패 / Q1 한도 소진 → R1 미리보기·편집 / R2 저장 실패 → W1 Word
@@ -51,9 +52,23 @@ export function Workspace({ profile }: { profile: Profile }) {
     } catch (e) {
       // 실패한 변경은 다음 저장에 다시 싣는다
       const later = pendingDraft.current as { date: string; patch: DraftPatch } | null;
-      pendingDraft.current = { date: p.date, patch: { ...p.patch, ...(later?.date === p.date ? later.patch : {}) } };
+      const laterPatch = later?.date === p.date ? later.patch : {};
+      let patch: DraftPatch = { ...p.patch, ...laterPatch };
+      let reloaded = false;
+      // 화면을 연 뒤 관리자가 사진을 지우면 같은 선택을 다시 보내도 계속 거부된다. 서버가 정리한 선택으로 바꾸고 사진 선택은 다시 보내지 않는다.
+      if (e instanceof ApiError && e.status === 400 && p.patch.selectedPhotos && !laterPatch.selectedPhotos) {
+        try {
+          const v = await api<DayView>(`/api/days/${p.date}`);
+          setDay(v);
+          setSelected(v.selectedPhotos);
+          patch = { ...patch };
+          delete patch.selectedPhotos;
+          reloaded = true;
+        } catch {}
+      }
+      pendingDraft.current = Object.keys(patch).length ? { date: p.date, patch } : null;
       setDraftSaving("error");
-      setStatus({ kind: "err", text: `입력 내용을 저장하지 못했습니다: ${errorText(e)}` });
+      setStatus({ kind: "err", text: `입력 내용을 저장하지 못했습니다: ${errorText(e)}${reloaded ? "\n사진 선택을 다시 불러왔습니다. 사진을 확인한 뒤 다시 시도해 주세요." : ""}` });
       return false;
     }
   }, []);
@@ -187,13 +202,17 @@ export function Workspace({ profile }: { profile: Profile }) {
 
   // ---------- 사진(FUNC-6, SHARED-3) ----------
   function toggle(ref: PhotoRef) {
-    const next = selected.some((s) => sameRef(s, ref)) ? selected.filter((s) => !sameRef(s, ref)) : [...selected, ref];
+    const on = selected.some((s) => sameRef(s, ref));
+    if (!on && selected.length >= MAX_SELECTED) return setStatus({ kind: "warn", text: `사진은 ${MAX_SELECTED}장까지 고를 수 있습니다.` });
+    const next = on ? selected.filter((s) => !sameRef(s, ref)) : [...selected, ref];
     setSelected(next);
     queueDraft({ selectedPhotos: next }, 400);
   }
 
   function selectAll(on: boolean) {
-    const next = on ? [...selected, ...(day?.photos ?? []).filter((p) => !selected.some((s) => sameRef(s, p))).map(({ source, id }) => ({ source, id }))] : [];
+    const all = on ? [...selected, ...(day?.photos ?? []).filter((p) => !selected.some((s) => sameRef(s, p))).map(({ source, id }) => ({ source, id }))] : [];
+    const next = all.slice(0, MAX_SELECTED);
+    if (all.length > next.length) setStatus({ kind: "warn", text: `사진은 ${MAX_SELECTED}장까지 고를 수 있어 앞의 ${MAX_SELECTED}장만 골랐습니다.` });
     setSelected(next);
     queueDraft({ selectedPhotos: next }, 400);
   }
@@ -218,7 +237,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       await flushDraft();
       const v = await api<DayView>(`/api/days/${date}`);
       setDay(v);
-      const next = v.photos.length <= AUTO_SELECT_MAX ? [...selected, ...added] : selected;
+      const next = v.photos.length <= AUTO_SELECT_MAX ? [...selected, ...added].slice(0, MAX_SELECTED) : selected;
       if (next !== selected) {
         setSelected(next);
         queueDraft({ selectedPhotos: next }, 0);
