@@ -18,7 +18,7 @@ afterAll(async () => {
 
 describe("DATA-1 스키마", () => {
   it("migration을 순서대로 적용하고 두 번째 실행은 아무것도 적용하지 않는다", async () => {
-    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql"]);
+    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql"]);
     expect(await migrate(sql)).toEqual([]);
   });
 
@@ -102,5 +102,22 @@ describe("AI-9 동시 생성 방지", () => {
     const [a] = await sql`select id from companies where name = 'A사'`;
     await sql`insert into ai_inflight (company_id) values (${a.id})`;
     await expect(sql`insert into ai_inflight (company_id) values (${a.id})`).rejects.toThrow(/ai_inflight_pkey/);
+  });
+});
+
+describe("FUNC-1·FUNC-5 원본 파일 경로", () => {
+  it("기안문 원본은 그 회사 폴더 안에만 둘 수 있다", async () => {
+    const [a] = await sql`select id from companies where name = 'A사'`;
+    const [b] = await sql`select id from companies where name = 'B사'`;
+    await sql`update companies set proposal_storage_path = ${`companies/${a.id}/proposal/x.pdf`} where id = ${a.id}`;
+    await expect(sql`update companies set proposal_storage_path = ${`companies/${a.id}/proposal/x.pdf`} where id = ${b.id}`).rejects.toThrow(/companies_proposal_storage_path_check/);
+  });
+
+  it("교육자료 원본은 그 날짜의 자료 폴더 안에만 둘 수 있다", async () => {
+    await sql`insert into shared_days (report_date) values ('2026-11-04')`;
+    await sql`insert into shared_materials (report_date, kind, filename, text_content, storage_path) values ('2026-11-04', 'education', 'a.pdf', 't', 'shared/2026-11-04/materials/a.pdf')`;
+    await expect(
+      sql`insert into shared_materials (report_date, kind, filename, text_content, storage_path) values ('2026-11-04', 'education', 'a.pdf', 't', 'shared/2026-11-05/materials/a.pdf')`,
+    ).rejects.toThrow(/shared_materials_storage_path_check/);
   });
 });
