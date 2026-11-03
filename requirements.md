@@ -9,10 +9,10 @@
 | ID | 조건·기대 결과 | 근거 | 단계 | 구현·검사 위치 | 상태 |
 |---|---|---|---|---|---|
 | AUTH-1 | 로그인 화면은 회사명 드롭다운 + 비밀번호. 회원가입·이메일 인증 없음, 회사 1개 = 계정 1개 | p.1 §2 | 1차 | — | 미구현 |
-| AUTH-2 | 드롭다운은 19개사(COMP-1). "주식회사·(주)"를 뒤로 보낸 가나다순 표시(예: 디지털프레소(주)) | p.6 §6-4 | 1차 | — | 미구현 |
-| AUTH-3 | 관리자가 회사별 초기 비밀번호 발급. 최초 로그인 시 8자 이상 새 비밀번호로 변경 강제 | p.1 §2 | 1차 | — | 미구현 |
+| AUTH-2 | 드롭다운은 19개사(COMP-1). "주식회사·(주)"를 뒤로 보낸 가나다순 표시(예: 디지털프레소(주)) | p.6 §6-4 | 1차 | `src/server/domain/company-name.ts` / `tests/domain/company-name.test.ts` | 구현 중(규칙만, 화면 미연결) |
+| AUTH-3 | 관리자가 회사별 초기 비밀번호 발급. 최초 로그인 시 8자 이상 새 비밀번호로 변경 강제 | p.1 §2 | 1차 | `src/server/domain/login-lock.ts` (8자 검사) / `tests/domain/login-lock.test.ts` | 구현 중(규칙만) |
 | AUTH-4 | 비밀번호는 bcrypt 또는 argon2 해시만 저장. 평문 저장·로그 출력 금지 | p.1 §2 | 1차 | — | 미구현 |
-| AUTH-5 | 로그인 5회 연속 실패 시 15분 잠금 | p.1 §2, p.5 §6-2 | 1차 | — | 미구현 |
+| AUTH-5 | 로그인 5회 연속 실패 시 15분 잠금 | p.1 §2, p.5 §6-2 | 1차 | `src/server/domain/login-lock.ts` / `tests/domain/login-lock.test.ts` | 구현 중(규칙만, 저장·API 미연결) |
 | AUTH-6 | 관리자가 비밀번호 초기화 → 다시 최초 로그인 흐름(AUTH-3) | p.1 §2 | 2차 | — | 미구현 |
 | AUTH-7 | 세션은 httpOnly·Secure 쿠키, 유효기간 14일, 로그아웃 버튼 | p.2 §2 | 1차 | — | 미구현 |
 | AUTH-8 | 회사 계정은 자기 회사의 회사정보·기안문·보고서·사진만 조회·수정. 다른 회사 id를 넣은 API 직접 호출도 거부 | p.2 §2, p.5 §5-3, p.5 §6-2 | 1차 | — | 미구현 |
@@ -61,10 +61,10 @@
 
 | ID | 조건·기대 결과 | 근거 | 단계 | 구현·검사 위치 | 상태 |
 |---|---|---|---|---|---|
-| DATA-1 | 테이블 예시: companies, reports(회사별 날짜 유일), report_photos, ai_usage, login_attempts | p.4 §5-1 | 1차 | — | 미구현 |
+| DATA-1 | 테이블 예시: companies, reports(회사별 날짜 유일), report_photos, ai_usage, login_attempts | p.4 §5-1 | 1차 | `db/migrations/0001_init.sql` / `tests/db/migration.test.ts` | 구현 중(스키마만) |
 | DATA-2 | 사진은 객체 저장소, 회사별 폴더 분리, 서명 URL로만 제공 | p.4 §5-1 | 1차 | — | 미구현 |
 | DATA-3 | 운영 종료 후 보관 기한 안내 문구를 로그인 화면에 표시, 기한 후 일괄 삭제 | p.5 §5-3 | 1차(문구)·종료(삭제) | — | 결정 대기(D3) |
-| OPS-1 | 배포 스택 무관, 개발자에게 익숙한 스택 우선. HTTPS 필수, 기억하기 쉬운 주소 | p.4 §5-2 | 1차 | — | 결정 대기(D4, D6) |
+| OPS-1 | 배포 스택 무관, 개발자에게 익숙한 스택 우선. HTTPS 필수, 기억하기 쉬운 주소 | p.4 §5-2 | 1차 | — | 결정 대기(D4, D8) |
 | OPS-2 | 유럽(베를린·헬싱키) 접속 허용, 속도 확인 | p.4 §5-2 | 1차 | — | 미구현 |
 | OPS-3 | 업로드 요청당 50MB 이상 허용 또는 ZIP은 브라우저에서 처리 | p.4 §5-2 | 1차 | — | 미구현 |
 | OPS-4 | 종료 시 데이터 일괄 삭제, API 키 폐기 | p.5 §6-1 | 종료 | — | 미구현 |
@@ -98,9 +98,10 @@
 | D3 | 데이터 보관 기한(안: 2026-12-31) | DATA-3, OPS-4 | p.5 §6-3 | — |
 | D4 | 접속 주소(도메인) | OPS-1 | p.5 §6-3 | — |
 | D5 | 초기 비밀번호 전달 방법 | AUTH-3 | p.5 §6-3 | — |
-| D6 | 개발·배포 스택과 폴더 구조 | 전체 | p.4 §5-2, [시니어 개발자 인터뷰](.agents/skills/proofstill-engineer/SKILL.md) | — |
+| D6 | 개발·배포 스택과 폴더 구조 | 전체 | p.4 §5-2, [시니어 개발자 인터뷰](.agents/skills/proofstill-engineer/SKILL.md) | Next.js + Supabase (2026-11-03 사용자 답변 "Next.js+Supabase"). Supabase CLI 미사용. 폴더는 AGENTS.md "스택과 폴더" |
 | D7 | 운영사 명단 대조 후 회사명 확정 | COMP-1, AUTH-2 | p.6 §6-4 | — |
+| D8 | Vercel 요금제(Hobby는 비상업 용도 한정, 함수 최대 300초) | OPS-1, AI-7 | [Vercel Functions Limits](https://vercel.com/docs/functions/limitations) | — |
 
-## 미확보 자료
+## 제공 자료
 
-- 프로토타입 원본 `index.html`(지시서 p.1 "별도 전달"): buildPrompt()·SCHEMA·파일 읽기·Word 변환 코드가 여기 있다. AI-4, AI-5, FUNC-5, FUNC-11의 재사용 근거이며 아직 이 폴더에 없다.
+- 프로토타입 원본: [prototype/GMEP_보고서작성기_프로토타입.html](prototype/GMEP_보고서작성기_프로토타입.html). `SCHEMA`·`buildPrompt()`는 이 파일 771행 부근이며 AI-4, AI-5, FUNC-5, FUNC-11의 재사용 근거다.

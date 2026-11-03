@@ -8,6 +8,14 @@
 - API 계약·OpenAPI·API Tracker 작업은 [proofstill-api](.agents/skills/proofstill-api/SKILL.md), DB 스키마·migration은 [proofstill-db](.agents/skills/proofstill-db/SKILL.md)를 따른다.
 - UI는 [jwdesign](.agents/skills/jwdesign/SKILL.md) 토큰과 컴포넌트를 우선하고 화면 구성에 [design-taste-frontend](.agents/skills/design-taste-frontend/SKILL.md)를 적용한다. 충돌 시 jwdesign을 따른다. UI 변경은 요청한 화면·행동에 필요한 최소 범위로 제한한다. 프로토타입 화면 구성은 재사용 대상이다.
 
+## 스택과 폴더
+- Next.js 16(App Router) + Vercel + Supabase(PostgreSQL·Storage). 2026-11-03 사용자 선택. Next.js 16은 이전 버전과 API·규칙이 다르다. 코드를 쓰기 전에 `node_modules/next/dist/docs/`의 해당 안내를 읽고 deprecation 안내를 따른다.
+- `src/app`: 화면과 Route Handler(HTTP 입력·응답). `src/server/domain`: 프레임워크·DB 없는 업무 규칙. 그 밖의 `src/server/*`: DB·Storage·Anthropic 연결과 실행 순서. 브라우저 코드는 `src/server`를 import하지 않는다.
+- DB 접근은 서버에서 `postgres` 드라이버로만 한다. 회사 인증은 Supabase Auth를 쓰지 않고 자체 세션 테이블을 사용한다. 모든 테이블은 RLS를 켜고 정책을 두지 않는다.
+- migration은 `db/migrations/*.sql`에 순서대로 추가하고 `npm run db:migrate`(`DATABASE_URL` 필요)로 적용한다. Supabase CLI는 쓰지 않는다. 적용한 migration 파일은 고치지 않고 새 파일을 추가한다.
+- 검사: `npm run check`(lint → typecheck → 전체 테스트). `test:domain`은 순수 규칙, `test:db`는 Testcontainers PostgreSQL에서 실제 migration·SQL 제약을 확인하며 Docker가 필요하다. Docker 오류를 건너뛰거나 통과로 취급하지 않는다.
+- 프로토타입 원본은 `prototype/`에 보존하고 수정하지 않는다. 프롬프트(`buildPrompt`)·`SCHEMA`·파일 읽기·Word 변환 코드는 여기서 옮긴다.
+
 ## 이 서비스의 고정 제약
 - 회사별 데이터 격리가 최우선이다. 모든 API는 세션의 company_id로 권한을 검사하고, 다른 회사 ID를 넣은 직접 호출도 거부하는 검사를 둔다. 관리자도 보고서·사진·기안문 내용은 열람할 수 없다.
 - Anthropic API 키·DB 비밀번호는 서버 환경변수로만 다룬다. 저장소·로그·브라우저 번들에 넣지 않는다. 브라우저에서 Anthropic API를 직접 호출하지 않는다.

@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GMEP 2026 일일 출장보고서 작성기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6eb;
+    --accent:#1f4fd1; --accent-ink:#ffffff; --accent-soft:#eaf0fd; --warn:#b45309; --ok:#15803d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;font-size:14px;line-height:1.55}
+  header{padding:22px 28px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{margin:0 0 4px;font-size:20px;font-weight:700;letter-spacing:-.2px}
+  header p{margin:0;color:var(--muted)}
+  .guide{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .chip{background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:500}
+  .chip.alt{background:#fff4e5;color:var(--warn)}
+  main{display:grid;grid-template-columns:420px 1fr;gap:20px;padding:20px 28px 40px;align-items:start}
+  @media (max-width:980px){main{grid-template-columns:1fr;padding:14px}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .step{padding:14px 0;border-bottom:1px dashed var(--line)}
+  .step:first-child{padding-top:0}
+  .step:last-of-type{border-bottom:0}
+  .step h2{font-size:14px;margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .num{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px}
+  .opt{font-weight:400;color:var(--muted);font-size:12px}
+  label.f{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  input[type=text],input[type=date],textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;background:#fbfbfc;color:var(--ink)}
+  textarea{resize:vertical;min-height:70px}
+  input:focus,textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  .drop{border:1.5px dashed #c9cfd8;border-radius:10px;padding:12px;text-align:center;color:var(--muted);cursor:pointer;background:#fbfbfc;font-size:13px}
+  .drop:hover,.drop.over{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+  .files{margin:8px 0 0;padding:0;list-style:none;font-size:12.5px}
+  .files li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:#f6f7f9;margin-top:4px}
+  .files li span.s{color:var(--muted)}
+  .x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1}
+  .x:hover{color:#c0262d}
+  .thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;max-height:340px;overflow:auto;padding:2px}
+  .thumbs div{cursor:pointer;outline:1px solid var(--line);transition:outline-color .1s, transform .1s}
+  .thumbs div:hover{outline:2px solid var(--accent);transform:translateY(-1px)}
+  .thumbs div.sel{outline:3px solid var(--accent)}
+  .thumbs .chk{position:absolute;left:5px;top:5px;width:20px;height:20px;border-radius:50%;border:2px solid #fff;background:rgba(0,0,0,.25);box-shadow:0 0 0 1px rgba(0,0,0,.2)}
+  .thumbs .no{position:absolute;left:5px;top:5px;min-width:20px;height:20px;background:var(--accent);color:#fff;border-radius:999px;font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 5px;border:2px solid #fff}
+  .thumbs .tag{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.55));color:#fff;font-size:11px;padding:10px 6px 4px;text-align:center;opacity:0;transition:opacity .1s}
+  .thumbs div:hover .tag{opacity:1}
+  .thumbs div.sel .tag{opacity:1;background:linear-gradient(transparent,rgba(31,79,209,.75))}
+  .phint{font-size:12.5px;color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:6px 10px;margin-top:8px}
+  .pbar{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--muted);margin-top:8px}
+  .pbar button{border:0;background:none;color:var(--accent);cursor:pointer;font:inherit;padding:0}
+  .thumbs div{position:relative;aspect-ratio:4/3;border-radius:6px;overflow:hidden;background:#eee}
+  .thumbs img{width:100%;height:100%;object-fit:cover}
+  .thumbs button{position:absolute;top:3px;right:3px;background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px}
+  .saved{font-size:12.5px;color:var(--ok);margin-top:6px}
+  button.primary{width:100%;margin-top:16px;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:700;font-size:15px;cursor:pointer}
+  button.primary:disabled{opacity:.55;cursor:default}
+  button.sec{padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;cursor:pointer;color:var(--ink)}
+  button.sec:hover{border-color:var(--accent);color:var(--accent)}
+  button.sec.solid{background:var(--ink);color:#fff;border-color:var(--ink)}
+  button.sec.solid:hover{background:#000;color:#fff}
+  .status{margin-top:10px;font-size:13px;color:var(--muted);min-height:20px;white-space:pre-wrap}
+  .status.err{color:#c0262d}
+  .rightcol{position:sticky;top:16px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .toolbar .grow{flex:1;min-width:200px}
+  .hint{font-size:12.5px;color:var(--muted);margin:-4px 0 10px}
+  .paper{background:#fff;border:1px solid var(--line);border-radius:4px;box-shadow:0 2px 14px rgba(20,30,50,.06);padding:48px 56px;min-height:600px;max-width:860px;margin:0 auto}
+  @media (max-width:700px){.paper{padding:22px 16px}}
+  .empty{color:var(--muted);text-align:center;padding:120px 20px}
+  .empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
+  #report{outline:none}
+  #report h1{font-size:21px;margin:0 0 18px;text-align:center;letter-spacing:-.3px}
+  #report h2{font-size:16px;margin:26px 0 10px;padding-bottom:5px;border-bottom:2px solid var(--ink)}
+  #report h3{font-size:14.5px;margin:16px 0 6px}
+  #report p{margin:6px 0}
+  #report ul{margin:4px 0 8px;padding-left:20px}
+  #report li{margin:2px 0}
+  #report table{border-collapse:collapse;width:100%;margin:6px 0 10px;font-size:13px}
+  #report th,#report td{border:1px solid #c7ccd4;padding:6px 8px;vertical-align:top;text-align:left}
+  #report th{background:#eef1f5;font-weight:700}
+  #report table.kv td:first-child{background:#eef1f5;font-weight:700;width:120px;white-space:nowrap}
+  #report .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+  #report .photos img{width:100%;border-radius:2px}
+  .loading{display:inline-block;width:14px;height:14px;border:2px solid #c9d6f7;border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .archive{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .archive .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .archive h2{font-size:14px;margin:0}
+  .badge{font-size:12px;padding:2px 10px;border-radius:999px;background:#eef1f5;color:var(--muted)}
+  .badge.cloud{background:#e7f6ec;color:var(--ok)}
+  .archive .top .sp{flex:1}
+  .alist{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+  .aitem{flex:0 0 auto;min-width:150px;max-width:220px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;cursor:pointer;background:#fbfbfc;position:relative}
+  .aitem:hover{border-color:var(--accent)}
+  .aitem.on{border-color:var(--accent);background:var(--accent-soft)}
+  .aitem .d{font-weight:700;font-size:13px}
+  .aitem .t{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:14px}
+  .aitem .x{position:absolute;top:6px;right:6px;font-size:13px}
+  .aempty{font-size:12.5px;color:var(--muted);padding:4px 0}
+  .savestate{font-size:12px;color:var(--muted)}
+  .confirm{display:none;margin-top:8px;font-size:13px;background:#fff4e5;border-radius:8px;padding:8px 10px}
+  .confirm button{margin-left:6px}
+  select{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit;background:#fbfbfc;color:var(--ink)}
+  .cnote{font-size:12px;color:var(--muted);margin-top:6px}
+  .cnote.warn{color:var(--warn)}
+  input[readonly],textarea[readonly]{background:#f1f2f4;color:#4b5260}
+  details.pv{margin-top:8px;font-size:12.5px}
+  details.pv summary{cursor:pointer;color:var(--accent)}
+  details.pv pre{white-space:pre-wrap;max-height:260px;overflow:auto;background:#f6f7f9;border-radius:8px;padding:10px;font:12px/1.5 "Noto Sans KR",sans-serif;margin:6px 0 0}
+  .note{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.5}
+</style>
+</head>
+<body>
+<header>
+  <h1>GMEP 2026 일일 출장보고서 작성기</h1>
+  <p>사전 출장 기안문, 운영사(노틸러스) 제공 일정, 참여 사진을 넣으면 증빙용 일일 결과보고서를 만들어 드립니다.</p>
+  <div class="guide">
+    <span class="chip">① 사전 기안문 (처음 한 번)</span>
+    <span class="chip">② 그날 일정 · 교육자료</span>
+    <span class="chip">③ 참여 사진</span>
+    <span class="chip alt">별도 성과·미팅은 '특이사항'에 따로 입력</span>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="step">
+      <h2><span class="num">1</span>회사 선택 <span class="opt">· 처음 한 번만 등록</span></h2>
+      <select id="companySel"><option value="">회사 목록 불러오는 중…</option></select>
+      <div class="cnote" id="compNote"></div>
+      <div id="compFields">
+        <label class="f" for="company">회사명</label>
+        <input type="text" id="company" placeholder="예: 주식회사 ○○○">
+        <label class="f" for="attendees">출장자 (이름·직위)</label>
+        <input type="text" id="attendees" placeholder="예: 홍길동(대표이사), 김철수(팀장)">
+        <label class="f" for="intro">주력 제품·사업 한두 줄 <span class="opt">(시사점 작성에 활용)</span></label>
+        <textarea id="intro" rows="2" placeholder="예: 건설 현장 사진 기반 문서 자동화 SaaS — 국내 종합건설사 POC 진행 중"></textarea>
+        <label class="f">사전 출장 기안문</label>
+        <div class="drop" id="dropPlan">출장 신청 기안문·계획서 PDF를 끌어 놓거나 클릭</div>
+        <input type="file" id="filePlan" accept=".pdf,.docx,.txt,.md" hidden>
+        <div id="planInfo"></div>
+        <details class="pv" id="planView" hidden><summary>기안문 내용 보기</summary><pre id="planPre"></pre></details>
+      </div>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">2</span>보고 일자</h2>
+      <input type="date" id="date">
+    </div>
+
+    <div class="step">
+      <h2>📦 구글 드라이브 폴더 한 번에 넣기 <span class="opt">· 선택</span></h2>
+      <div class="drop" id="dropZip">드라이브에서 그날 폴더를 <b>다운로드(ZIP)</b> 한 뒤 ZIP 파일을 그대로 끌어 놓으세요<br><span style="font-size:12px">사진은 참여 사진으로, 일정표·교육자료는 각 칸으로 자동 분류</span></div>
+      <input type="file" id="fileZip" accept=".zip,.pdf,.pptx,.docx,.txt,image/*" multiple hidden>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">3</span>운영사 제공 일정</h2>
+      <textarea id="schedule" rows="6" placeholder="카톡·메일로 받은 그날 일정을 그대로 붙여 넣으세요.&#10;예) 09:30 betahaus 온보딩&#10;10:00 betahaus 스토리 (CEO) ..."></textarea>
+      <div class="drop" id="dropSched" style="margin-top:8px">일정표가 이미지·PDF라면 여기에</div>
+      <input type="file" id="fileSched" accept=".pdf,.docx,.pptx,.txt,image/*" multiple hidden>
+      <ul class="files" id="listSched"></ul>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">4</span>교육자료 <span class="opt">· 선택, 받은 경우</span></h2>
+      <div class="drop" id="dropEdu">PDF · PPTX · DOCX · 이미지 (여러 개 가능)</div>
+      <input type="file" id="fileEdu" accept=".pdf,.pptx,.docx,.txt,.md,image/*" multiple hidden>
+      <ul class="files" id="listEdu"></ul>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">5</span>참여 사진</h2>
+      <div class="cnote" style="margin:-4px 0 8px">사진은 폴더째보다 한 장씩 따로 올리시길 권장합니다 (여러 장을 한꺼번에 올리면 느려요)</div>
+      <div class="drop" id="dropPhoto">사진을 여러 장 올린 뒤, 보고서에 넣을 사진만 눌러서 고르세요</div>
+      <input type="file" id="filePhoto" accept="image/*" multiple hidden>
+      <div class="pbar" id="pbar" hidden><span id="pcount"></span><span><button id="pAll">모두 선택</button> · <button id="pNone">선택 해제</button></span></div>
+      <div class="phint" id="phint" hidden>👆 업로드는 끝났습니다. 보고서에 넣을 사진을 눌러서 선택하세요 (선택한 순서대로 번호가 붙습니다)</div>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">6</span>특이사항 <span class="opt">· 별도 성과, 별도 미팅 등</span></h2>
+      <textarea id="special" rows="4" placeholder="예) 점심 네트워킹에서 ○○사 CTO와 PoC 논의, 11/10 후속 미팅 확정&#10;라운드테이블에서 법률 전문가와 1:1 매칭"></textarea>
+    </div>
+
+    <button class="primary" id="btnGen">보고서 만들기</button>
+    <div class="status" id="status"></div>
+    <p class="note">회사를 한 번 등록하면 다음부터는 목록에서 고르기만 하면 기안문까지 불러옵니다. 작성한 보고서와 사진은 회사별·날짜별로 보관함에 자동 저장됩니다. 보고서 작성에는 Claude가 사용되며, 첫 사용 시 허용 여부를 묻습니다.</p>
+  </section>
+
+  <section class="rightcol">
+    <div class="archive">
+      <div class="top">
+        <h2>보관함</h2>
+        <span class="badge" id="storeBadge">저장소 연결 중…</span>
+        <span class="sp"></span>
+        <span class="savestate" id="saveState"></span>
+        <button class="sec" id="btnNew">새 보고서</button>
+        <button class="sec" id="btnAll" disabled>전체 합본 Word</button>
+      </div>
+      <div class="alist" id="alist"><div class="aempty">작성한 보고서가 날짜별로 여기에 쌓입니다.</div></div>
+      <div class="confirm" id="confirmDel"><span id="confirmText"></span><button class="sec" id="delYes">삭제</button><button class="sec" id="delNo">취소</button></div>
+    </div>
+    <div class="toolbar">
+      <button class="sec solid" id="btnDocx" disabled>Word(.docx) 다운로드</button>
+      <button class="sec" id="btnCopy" disabled>본문 복사</button>
+      <input type="text" class="grow" id="revise" placeholder="수정 요청 (예: 시사점을 더 구체적으로, 성과에 ○○ 추가)" disabled>
+      <button class="sec" id="btnRevise" disabled>반영</button>
+    </div>
+    <p class="hint">미리보기의 문장은 직접 클릭해서 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다.</p>
+    <div class="paper">
+      <div id="report"><div class="empty"><b>왼쪽 내용을 채우고 '보고서 만들기'를 누르세요</b>기안문과 일정만 있어도 만들 수 있고, 교육자료가 있으면 세부 교육 내용이 풍부해집니다.</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = { planText: '', planName: '', schedFiles: [], eduFiles: [], photos: [], report: null };
+  let sample = null, downloads = null;
+
+  // ---------- storage (cloud db → fallback IndexedDB) ----------
+  const store = { mode:'pending', db:null, uid:null, idb:null };
+  const PROF = () => `data/users/${store.uid}/profile`;
+  function idbOpen(){
+    return new Promise((res) => {
+      try{
+        const r = indexedDB.open('gmep_reports', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => res(r.result); r.onerror = () => res(null);
+      }catch(e){ res(null); }
+    });
+  }
+  function idbDo(mode, fn){
+    return new Promise((res, rej) => {
+      if(!store.idb) return res(null);
+      const tx = store.idb.transaction('kv', mode); const os = tx.objectStore('kv');
+      const req = fn(os); tx.oncomplete = () => res(req && req.result); tx.onerror = () => rej(tx.error);
+    });
+  }
+  const idbGet = (k) => idbDo('readonly', os => os.get(k));
+  const idbPut = (k, v) => idbDo('readwrite', os => os.put(v, k));
+  const idbDel = (k) => idbDo('readwrite', os => os.delete(k));
+  const idbKeys = () => idbDo('readonly', os => os.getAllKeys());
+
+  async function storeInit(){
+    store.idb = await idbOpen();
+    let db = null, user = null;
+    try{
+      if(window.claude && claude.use){
+        [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+      }
+    }catch(e){}
+    let uid = null;
+    try{ uid = user ? await user.id() : null; }catch(e){}
+    try{ store.owner = user ? !!(await user.isOwner()) : false; }catch(e){ store.owner = false; }
+    if(db && uid){
+      store.db = db; store.uid = uid;
+      try{ await db.doc(PROF()).get(); store.mode = 'cloud'; }
+      catch(e){ store.mode = 'local'; }
+    } else store.mode = 'local';
+    renderBadge();
+  }
+  function renderBadge(){
+    const b = $('storeBadge');
+    if(store.mode === 'cloud'){ b.className = 'badge cloud'; b.textContent = '☁ 내 계정에 저장 · 어느 기기에서나'; }
+    else { b.className = 'badge'; b.textContent = store.idb ? '이 브라우저에만 저장' : '저장 불가 (임시 사용)'; }
+  }
+  async function cloudFail(err){
+    // view-only etc.: fall back to local for the rest of the visit
+    if(store.mode === 'cloud' && err && (err.code === 'invalid_argument' || err.code === 'revoked' || err.code === 'not_granted')){
+      store.mode = 'local'; renderBadge();
+      setSave('계정 저장 권한이 없어 이 브라우저에 저장합니다');
+      return true;
+    }
+    return false;
+  }
+
+  async function profileLoad(){
+    let p = null;
+    if(store.mode === 'cloud'){ try{ const s = await store.db.doc(PROF()).get(); if(s.exists) p = s.data(); }catch(e){} }
+    if(!p){ try{ p = await idbGet('profile'); }catch(e){} }
+    if(!p){ try{ p = JSON.parse(localStorage.getItem('gmep_report_profile_v1') || 'null'); }catch(e){} }
+    return p || {};
+  }
+  async function profileSave(p){
+    if(store.mode === 'cloud'){
+      try{ await store.db.doc(PROF()).set(p); return; }catch(e){ if(!(await cloudFail(e))) throw e; }
+    }
+    try{ await idbPut('profile', p); }catch(e){}
+  }
+
+  // report record: {date,title,html,schedule,special,photoCount,updatedAt}
+  const repRef = (date) => store.db.doc(PROF()).collection('reports').doc(date);
+  async function reportsList(){
+    if(store.mode === 'cloud'){
+      try{
+        const q = await store.db.doc(PROF()).collection('reports').get();
+        return q.docs.map(d => d.data()).filter(Boolean);
+      }catch(e){ await cloudFail(e); }
+    }
+    const keys = (await idbKeys().catch(()=>[])) || [];
+    const out = [];
+    for(const k of keys){ if(String(k).startsWith('report:')){ const r = await idbGet(k); if(r){ const {photos, ...meta} = r; out.push(meta); } } }
+    return out;
+  }
+  async function reportSave(rec, photos, photosDirty){
+    if(store.mode === 'cloud'){
+      try{
+        const prev = await repRef(rec.key).get();
+        const prevCount = prev.exists ? (prev.data().photoCount || 0) : 0;
+        await repRef(rec.key).set(rec);
+        if(photosDirty){
+          const col = repRef(rec.key).collection('photos');
+          for(let i=0;i<photos.length;i++){ const p = photos[i]; await col.doc(String(i)).set({dataUrl:p.dataUrl, w:p.w, h:p.h}); }
+          for(let i=photos.length;i<prevCount;i++) await col.doc(String(i)).delete();
+        }
+        return;
+      }catch(e){
+        if(e && e.code === 'quota_exceeded') throw new Error('저장 공간이 가득 찼습니다. 오래된 보고서를 Word로 받아 두고 보관함에서 지워 주세요.');
+        if(!(await cloudFail(e))) throw e;
+      }
+    }
+    await idbPut('report:' + rec.key, {...rec, photos: photos.map(p => ({dataUrl:p.dataUrl, w:p.w, h:p.h}))});
+  }
+  async function reportLoad(date){
+    if(store.mode === 'cloud'){
+      const s = await repRef(date).get();
+      if(!s.exists) return null;
+      const rec = {...s.data()}; const photos = [];
+      const col = repRef(date).collection('photos');
+      for(let i=0;i<(rec.photoCount||0);i++){ const ps = await col.doc(String(i)).get(); if(ps.exists) photos.push({...ps.data(), name:'photo'+i}); }
+      return {rec, photos};
+    }
+    const r = await idbGet('report:' + date);
+    if(!r) return null;
+    const {photos, ...rec} = r; return {rec, photos: photos || []};
+  }
+  async function reportDelete(date){
+    if(store.mode === 'cloud'){
+      const s = await repRef(date).get();
+      const n = s.exists ? (s.data().photoCount || 0) : 0;
+      const col = repRef(date).collection('photos');
+      for(let i=0;i<n;i++) await col.doc(String(i)).delete();
+      await repRef(date).delete();
+      return;
+    }
+    await idbDel('report:' + date);
+  }
+
+  // ---------- companies (shared list) ----------
+  const comp = { list:[], sel:null };
+  async function companiesLoad(){
+    if(store.mode === 'cloud'){
+      try{ const q = await store.db.collection('companies').get(); return q.docs.filter(d => d.exists).map(d => ({id:d.id, ...d.data()})); }
+      catch(e){ await cloudFail(e); }
+    }
+    const m = (await idbGet('companies').catch(()=>null)) || {};
+    return Object.entries(m).map(([id,v]) => ({id, ...v}));
+  }
+  async function companyPut(c){
+    const body = { name:c.name||'', attendees:c.attendees||'', intro:c.intro||'', planText:c.planText||'', planName:c.planName||'', updatedAt:new Date().toISOString(), by:store.uid||'' };
+    if(store.mode === 'cloud'){
+      try{ await store.db.doc('companies/' + c.id).set(body); return; }
+      catch(e){ if(!(await cloudFail(e))) throw e; }
+    }
+    const m = (await idbGet('companies').catch(()=>null)) || {}; m[c.id] = body; await idbPut('companies', m);
+  }
+  const writable = (c) => !!c && (store.mode !== 'cloud' || c.id === store.uid || store.owner);
+  function newCompanyId(){
+    if(store.mode === 'cloud' && !store.owner) return store.uid;
+    return 'c-' + Math.random().toString(36).slice(2,10);
+  }
+  function renderCompanySel(){
+    const sel = $('companySel');
+    const opts = comp.list.filter(c => c.name).sort((a,b) => a.name.localeCompare(b.name, 'ko'));
+    sel.innerHTML = '<option value="">— 회사를 선택하세요 —</option>' +
+      opts.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('') +
+      '<option value="__new">＋ 새 회사 등록</option>';
+    if(!comp.sel) sel.value = '';
+    else sel.value = opts.some(c => c.id === comp.sel.id) ? comp.sel.id : '__new';
+  }
+  function fillCompany(){
+    const c = comp.sel, w = writable(c);
+    $('compFields').style.display = c ? '' : 'none';
+    ['company','attendees','intro'].forEach(k => { $(k).value = c ? (c[k === 'company' ? 'name' : k] || '') : ''; $(k).readOnly = !w; });
+    $('dropPlan').style.display = w ? '' : 'none';
+    state.planText = c ? (c.planText || '') : ''; state.planName = c ? (c.planName || '') : '';
+    state.planImage = null;
+    const note = $('compNote');
+    if(!c){ note.className = 'cnote'; note.textContent = '목록에 회사가 없으면 ‘＋ 새 회사 등록’을 고르세요.'; }
+    else if(!w){ note.className = 'cnote warn'; note.textContent = '다른 분이 등록한 회사 정보입니다. 수정은 등록한 분만 할 수 있습니다.'; }
+    else if(store.mode === 'cloud'){ note.className = 'cnote'; note.textContent = '등록한 회사 정보와 기안문은 이 작성기를 쓰는 다른 대표님도 목록에서 볼 수 있습니다.'; }
+    else { note.className = 'cnote'; note.textContent = '이 브라우저에만 저장됩니다.'; }
+    renderPlanInfo();
+  }
+  async function selectCompany(id){
+    if(id === '__new'){
+      if(store.mode === 'cloud' && !store.owner && comp.list.some(c => c.id === store.uid && c.name)){
+        comp.sel = comp.list.find(c => c.id === store.uid);
+        setStatus('계정당 회사 하나만 등록할 수 있어 내가 등록한 회사를 열었습니다. 내용을 고치면 됩니다.');
+      } else comp.sel = { id:newCompanyId(), name:'', attendees:'', intro:'', planText:'', planName:'', isNew:true };
+    } else comp.sel = comp.list.find(c => c.id === id) || null;
+    renderCompanySel(); fillCompany();
+    profileSave({ companyId: comp.sel && !comp.sel.isNew ? comp.sel.id : '' }).catch(()=>{});
+    resetReport(true);
+    await refreshArchive();
+  }
+  $('companySel').addEventListener('change', e => selectCompany(e.target.value));
+
+  let compTimer = null;
+  function saveCompanySoon(){
+    const c = comp.sel; if(!c || !writable(c)) return;
+    c.name = $('company').value.trim(); c.attendees = $('attendees').value.trim(); c.intro = $('intro').value.trim();
+    c.planText = state.planText; c.planName = state.planName;
+    if(!c.name){ setSave('회사명을 넣으면 저장됩니다'); return; }
+    clearTimeout(compTimer);
+    compTimer = setTimeout(async () => {
+      try{
+        await companyPut(c);
+        const wasNew = c.isNew; delete c.isNew;
+        const i = comp.list.findIndex(x => x.id === c.id); if(i >= 0) comp.list[i] = c; else comp.list.push(c);
+        renderCompanySel();
+        if(wasNew) profileSave({ companyId:c.id }).catch(()=>{});
+        setSave('회사 정보 저장됨 ✓');
+      }catch(e){ setStatus('회사 정보를 저장하지 못했습니다. 다시 시도해 주세요.', 'err'); }
+    }, 500);
+  }
+  function saveProfile(){ saveCompanySoon(); }
+  ['company','attendees','intro'].forEach(k => $(k).addEventListener('change', saveCompanySoon));
+
+  // ---------- archive ----------
+  let archive = [];
+  const WK = ['일','월','화','수','목','금','토'];
+  function fmtDate(d){ const t = new Date(d + 'T00:00:00'); return isNaN(t) ? d : `${t.getMonth()+1}.${t.getDate()}.(${WK[t.getDay()]})`; }
+  async function refreshArchive(){
+    const cid = comp.sel && comp.sel.id;
+    archive = cid ? (await reportsList()).filter(r => r && r.date && r.key && r.companyId === cid).sort((a,b) => a.date < b.date ? 1 : -1) : [];
+    renderArchive();
+  }
+  function renderArchive(){
+    const el = $('alist');
+    $('btnAll').disabled = !archive.length;
+    if(!archive.length){ el.innerHTML = '<div class="aempty">작성한 보고서가 날짜별로 여기에 쌓입니다.</div>'; return; }
+    el.innerHTML = archive.map(r => `<div class="aitem${r.key === state.reportKey ? ' on' : ''}" data-d="${esc(r.key)}"><div class="d">${esc(fmtDate(r.date))}</div><div class="t">${esc((r.title||'').replace(/^GMEP\s*일일\s*출장보고서\s*[—-]?\s*/,'') || '보고서')}</div><div class="t">사진 ${r.photoCount||0}장</div><button class="x" data-del="${esc(r.key)}" title="삭제">✕</button></div>`).join('');
+    el.querySelectorAll('.aitem').forEach(it => it.onclick = (e) => {
+      if(e.target.dataset.del){ askDelete(e.target.dataset.del); return; }
+      openReport(it.dataset.d);
+    });
+  }
+  let pendingDel = null;
+  function askDelete(key){
+    pendingDel = key;
+    $('confirmText').textContent = `${fmtDate(key.split('__')[0])} 보고서와 사진을 보관함에서 지울까요? 되돌릴 수 없습니다.`;
+    $('confirmDel').style.display = 'block';
+  }
+  $('delNo').onclick = () => { pendingDel = null; $('confirmDel').style.display = 'none'; };
+  $('delYes').onclick = async () => {
+    const d = pendingDel; $('confirmDel').style.display = 'none'; if(!d) return;
+    try{ await reportDelete(d); if(state.reportKey === d) resetReport(true); await refreshArchive(); setSave('삭제했습니다'); }
+    catch(e){ setStatus('삭제하지 못했습니다. 다시 시도해 주세요.', 'err'); }
+  };
+
+  function sanitize(html){
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+    doc.querySelectorAll('script,iframe,object,embed,style,link').forEach(n => n.remove());
+    doc.querySelectorAll('*').forEach(n => [...n.attributes].forEach(a => { if(/^on/i.test(a.name) || /javascript:/i.test(a.value)) n.removeAttribute(a.name); }));
+    return doc.body.firstChild.innerHTML;
+  }
+  async function openReport(key){
+    try{
+      setSave('불러오는 중…');
+      const r = await reportLoad(key);
+      if(!r){ setSave('보고서를 찾지 못했습니다'); return; }
+      const date = r.rec.date; state.reportKey = key; state.reportDate = date; $('date').value = date;
+      $('schedule').value = r.rec.schedule || ''; $('special').value = r.rec.special || '';
+      state.cands = r.photos.map((e,i) => ({entry:e, url:e.dataUrl, sel:true, order:i+1})); syncPhotos(); state.photosDirty = false; renderThumbs();
+      state.report = {loaded:true};
+      $('report').innerHTML = sanitize(r.rec.html || '');
+      const ph = $('report').querySelector('.photos'); if(ph) ph.outerHTML = photosHtml();
+      enableReport(); renderArchive(); setSave(`${fmtDate(date)} 보고서를 열었습니다`);
+    }catch(e){ setSave('불러오지 못했습니다'); }
+  }
+  function resetReport(){
+    state.report = null; state.reportDate = null; state.reportKey = null; state.cands.forEach(c => c.file && URL.revokeObjectURL(c.url)); state.cands = []; state.photos = []; state.photosDirty = false; renderThumbs();
+    $('schedule').value = ''; $('special').value = ''; state.schedFiles.length = 0; state.eduFiles.length = 0;
+    renderList(state.schedFiles,'listSched'); renderList(state.eduFiles,'listEdu');
+    $('report').contentEditable = 'false';
+    $('report').innerHTML = '<div class="empty"><b>왼쪽 내용을 채우고 \'보고서 만들기\'를 누르세요</b>기안문과 일정만 있어도 만들 수 있고, 교육자료가 있으면 세부 교육 내용이 풍부해집니다.</div>';
+    ['btnDocx','btnCopy','revise','btnRevise'].forEach(id => $(id).disabled = true);
+    renderArchive();
+  }
+  $('btnNew').onclick = () => { resetReport(); try{ $('date').value = new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }catch(e){} setSave(''); };
+
+  // ---------- autosave current report ----------
+  function setSave(t){ $('saveState').textContent = t; }
+  let saveTimer = null, saving = false, saveAgain = false;
+  function queueSave(delay){ clearTimeout(saveTimer); setSave('저장 대기…'); saveTimer = setTimeout(saveCurrent, delay ?? 1500); }
+  async function saveCurrent(){
+    if(!state.report || !state.reportKey) return;
+    if(saving){ saveAgain = true; return; }
+    saving = true; setSave('저장 중…');
+    try{
+      const clone = $('report').cloneNode(true);
+      const ph = clone.querySelector('.photos'); if(ph) ph.innerHTML = '';
+      const title = (clone.querySelector('h1') || {}).innerText || 'GMEP 일일 출장보고서';
+      const rec = { key:state.reportKey, date:state.reportDate, companyId:comp.sel ? comp.sel.id : '', companyName:$('company').value.trim(), title, html:clone.innerHTML, schedule:$('schedule').value, special:$('special').value, photoCount:state.photos.length, company:$('company').value, updatedAt:new Date().toISOString() };
+      await reportSave(rec, state.photos, state.photosDirty);
+      state.photosDirty = false;
+      const i = archive.findIndex(a => a.key === rec.key);
+      const meta = {...rec}; if(i >= 0) archive[i] = meta; else archive.push(meta);
+      archive.sort((a,b) => a.date < b.date ? 1 : -1); renderArchive();
+      setSave('저장됨 ✓ ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}));
+    }catch(e){ setSave(''); setStatus((e && e.message) || '저장하지 못했습니다.', 'err'); }
+    finally{ saving = false; if(saveAgain){ saveAgain = false; queueSave(800); } }
+  }
+  $('report').addEventListener('input', () => { if(state.report) queueSave(2500); });
+
+  // default date = today (KST)
+  try{
+    const d = new Date(Date.now() + 9*3600*1000);
+    $('date').value = d.toISOString().slice(0,10);
+  }catch(e){}
+
+  // ---------- capabilities ----------
+  if(window.claude && claude.use){
+    claude.use('sample').then(s => { sample = s; });
+    claude.use('downloads').then(d => { downloads = d; });
+  }
+
+  // ---------- status ----------
+  function setStatus(msg, kind){
+    const el = $('status');
+    el.className = 'status' + (kind === 'err' ? ' err' : '');
+    el.innerHTML = kind === 'busy' ? '<span class="loading"></span>' + esc(msg) : esc(msg);
+  }
+  function esc(s){ return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // ---------- file extraction ----------
+  const ext = (name) => (name.split('.').pop() || '').toLowerCase();
+  const isImage = (f) => /^image\//.test(f.type) || ['png','jpg','jpeg','webp','gif','heic'].includes(ext(f.name));
+
+  async function pdfText(buf){
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let out = [];
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      let line = '';
+      const lines = [];
+      for(const it of tc.items){
+        line += it.str;
+        if(it.hasEOL){ lines.push(line); line=''; } else line += ' ';
+      }
+      if(line.trim()) lines.push(line);
+      out.push(`[p.${i}]\n` + lines.map(l => l.replace(/\s+/g,' ').trim()).filter(Boolean).join('\n'));
+    }
+    return out.join('\n');
+  }
+  function xmlText(xml, paraTag, textTag){
+    const paras = xml.split(new RegExp(`</${paraTag}>`));
+    return paras.map(p => {
+      const m = p.match(new RegExp(`<${textTag}[^>]*>([^<]*)</${textTag}>`, 'g')) || [];
+      return m.map(x => x.replace(/<[^>]+>/g,'')).join('');
+    }).map(s => s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").trim()).filter(Boolean).join('\n');
+  }
+  async function pptxText(buf){
+    const zip = await JSZip.loadAsync(buf);
+    const slides = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a,b) => parseInt(a.match(/\d+/g).pop()) - parseInt(b.match(/\d+/g).pop()));
+    const out = [];
+    for(const [i,n] of slides.entries()){
+      const x = await zip.file(n).async('string');
+      const t = xmlText(x, 'a:p', 'a:t');
+      if(t) out.push(`[슬라이드 ${i+1}]\n${t}`);
+    }
+    return out.join('\n');
+  }
+  async function docxText(buf){
+    const zip = await JSZip.loadAsync(buf);
+    const f = zip.file('word/document.xml');
+    if(!f) return '';
+    const x = await f.async('string');
+    // keep hyperlink targets visible
+    return xmlText(x, 'w:p', 'w:t');
+  }
+  async function extract(file){
+    const e = ext(file.name);
+    if(isImage(file)) return { name:file.name, image: await toJpegBlob(file, 1600), text:'' };
+    const buf = await file.arrayBuffer();
+    let text = '';
+    if(e === 'pdf') text = await pdfText(buf);
+    else if(e === 'pptx') text = await pptxText(buf);
+    else if(e === 'docx') text = await docxText(buf);
+    else if(['txt','md','csv'].includes(e)) text = new TextDecoder().decode(buf);
+    else throw new Error(`${file.name}: 지원하지 않는 형식 (PDF·PPTX·DOCX·이미지·텍스트만 가능)`);
+    if(!text.trim()) throw new Error(`${file.name}: 글자를 읽을 수 없는 파일 (스캔본이면 사진으로 찍어 이미지로 올려 주세요)`);
+    return { name:file.name, text };
+  }
+
+  // ---------- images ----------
+  function loadImg(src){ return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+  async function toJpegBlob(file, max){
+    const url = URL.createObjectURL(file);
+    try{
+      const img = await loadImg(url);
+      const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth*s); c.height = Math.round(img.naturalHeight*s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      return await new Promise(r => c.toBlob(r, 'image/jpeg', max <= 1100 ? 0.78 : 0.85));
+    } finally { URL.revokeObjectURL(url); }
+  }
+  async function photoEntry(file){
+    const blob = await toJpegBlob(file, 1100);
+    const dataUrl = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    const img = await loadImg(dataUrl);
+    return { name:file.name, dataUrl, w:img.naturalWidth, h:img.naturalHeight };
+  }
+
+  // ---------- drop zones ----------
+  function wireDrop(zoneId, inputId, handler){
+    const z = $(zoneId), inp = $(inputId);
+    z.addEventListener('click', () => inp.click());
+    inp.addEventListener('change', () => { handler([...inp.files]); inp.value=''; });
+    z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); });
+    z.addEventListener('dragleave', () => z.classList.remove('over'));
+    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); handler([...e.dataTransfer.files]); });
+  }
+
+  wireDrop('dropPlan', 'filePlan', async (files) => {
+    const f = files[0]; if(!f) return;
+    if(!comp.sel || !writable(comp.sel)){ setStatus('먼저 회사를 고르거나 새로 등록해 주세요.', 'err'); return; }
+    setStatus('기안문 읽는 중…', 'busy');
+    try{
+      const r = await extract(f);
+      if(r.image){ setStatus('기안문은 PDF·DOCX·텍스트 파일로 올려 주세요.', 'err'); return; }
+      state.planText = r.text.slice(0, 15000); state.planImage = null; state.planName = f.name;
+      saveCompanySoon(); renderPlanInfo(); setStatus('');
+    }catch(err){ setStatus(err.message, 'err'); }
+  });
+  function renderPlanInfo(){
+    const el = $('planInfo');
+    if(state.planText || state.planImage){
+      el.innerHTML = `<div class="saved">✓ ${esc(state.planName)} ${state.planText ? '· ' + state.planText.length.toLocaleString() + '자 읽음 · 저장됨' : '· 이미지'} <button class="x" id="planX" title="지우기">✕</button></div>`;
+      const px = $('planX');
+      if(comp.sel && writable(comp.sel)) px.onclick = () => { state.planText=''; state.planImage=null; state.planName=''; saveCompanySoon(); renderPlanInfo(); };
+      else px.remove();
+    } else el.innerHTML = comp.sel ? '<div class="cnote warn">아직 기안문이 없습니다.</div>' : '';
+    $('planView').hidden = !state.planText;
+    $('planPre').textContent = state.planText || '';
+  }
+
+  async function addDocs(files, list, listId){
+    for(const f of files){
+      setStatus(`${f.name} 읽는 중…`, 'busy');
+      try{ list.push(await extract(f)); }
+      catch(err){ setStatus(err.message, 'err'); continue; }
+    }
+    if(!$('status').classList.contains('err')) setStatus('');
+    renderList(list, listId);
+  }
+  function renderList(list, listId){
+    const ul = $(listId);
+    ul.innerHTML = list.map((d,i) => `<li><span>${esc(d.name)} <span class="s">${d.image ? '이미지' : d.text.length.toLocaleString()+'자'}</span></span><button class="x" data-i="${i}">✕</button></li>`).join('');
+    ul.querySelectorAll('button').forEach(b => b.onclick = () => { list.splice(+b.dataset.i,1); renderList(list, listId); });
+  }
+  wireDrop('dropSched', 'fileSched', (fs) => addDocs(fs, state.schedFiles, 'listSched'));
+  wireDrop('dropEdu', 'fileEdu', (fs) => addDocs(fs, state.eduFiles, 'listEdu'));
+
+  // ---------- Drive ZIP / mixed files ----------
+  const MIME = {jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif'};
+  const isSchedName = (n) => /일정|스케줄|schedule|agenda|timetable|program\s*brief|briefing/i.test(n);
+  async function sortFiles(files){
+    let nPhoto = 0, nSched = 0, nEdu = 0, skipped = [];
+    for(const f of files){
+      const e = ext(f.name);
+      if(e === 'zip'){
+        setStatus(`${f.name} 푸는 중…`, 'busy');
+        const zip = await JSZip.loadAsync(await f.arrayBuffer());
+        const inner = [];
+        for(const [path, entry] of Object.entries(zip.files)){
+          if(entry.dir || /(^|\/)(__MACOSX|\.)/.test(path)) continue;
+          const name = path.split('/').pop(); const ie = ext(name);
+          const blob = await entry.async('blob');
+          inner.push(new File([blob], name, {type: MIME[ie] || ''}));
+        }
+        const r = await sortFiles(inner);
+        nPhoto += r.nPhoto; nSched += r.nSched; nEdu += r.nEdu; skipped = skipped.concat(r.skipped);
+        continue;
+      }
+      try{
+        if(isImage(f)){ addCand(f); nPhoto++; }
+        else if(['pdf','pptx','docx','txt','md'].includes(e)){
+          setStatus(`${f.name} 읽는 중…`, 'busy');
+          const d = await extract(f);
+          if(isSchedName(f.name)){ state.schedFiles.push(d); nSched++; } else { state.eduFiles.push(d); nEdu++; }
+        } else skipped.push(f.name);
+      }catch(err){ skipped.push(f.name); }
+    }
+    return {nPhoto, nSched, nEdu, skipped};
+  }
+  wireDrop('dropZip', 'fileZip', async (files) => {
+    try{
+      const r = await sortFiles(files);
+      renderThumbs(); renderList(state.schedFiles,'listSched'); renderList(state.eduFiles,'listEdu');
+      if(r.nPhoto) await afterAdd(r.nPhoto);
+      let msg = `사진 ${r.nPhoto}장 · 일정 ${r.nSched}개 · 교육자료 ${r.nEdu}개를 넣었습니다.`;
+      if(r.nPhoto > 4) msg += ' 사진은 5번 칸에서 보고서에 넣을 것만 눌러 고르세요.';
+      if(r.nSched + r.nEdu) msg += ' 분류가 틀렸으면 각 칸에서 ✕로 빼고 다시 넣어 주세요.';
+      if(r.skipped.length) msg += `\n읽지 못한 파일: ${r.skipped.slice(0,5).join(', ')}${r.skipped.length > 5 ? ' 외' : ''}`;
+      setStatus(msg);
+    }catch(err){ setStatus('ZIP 파일을 풀지 못했습니다. 다시 받아서 넣어 주세요.', 'err'); }
+  });
+
+  state.cands = [];
+  function addCand(f){ state.cands.push({file:f, url:URL.createObjectURL(f), entry:null, sel:false}); }
+  function syncPhotos(){ state.photos = state.cands.filter(c => c.sel && c.entry).sort((a,b) => (a.order||0) - (b.order||0)).map(c => c.entry); }
+  async function selectCand(c, on){
+    if(on && !c.entry){ try{ c.entry = await photoEntry(c.file); }catch(e){ setStatus('이 사진은 열 수 없습니다 (HEIC 등은 JPG로 바꿔 올려 주세요).', 'err'); return; } }
+    c.sel = on; if(on) c.order = Date.now() + Math.random();
+  }
+  async function afterAdd(n){
+    // few photos → select all automatically; many → let the user pick
+    const fresh = state.cands.filter(c => !c.sel && !c.entry);
+    if(state.cands.length <= 4){ setStatus('사진 정리 중…', 'busy'); for(const c of fresh) await selectCand(c, true); setStatus(''); }
+    else setStatus(`사진 ${state.cands.length}장 중 보고서에 넣을 사진을 눌러 고르세요 (권장 3~6장).`);
+    state.cands.sort((a,b) => (b.sel - a.sel) || ((a.order||0) - (b.order||0)));
+    syncPhotos(); renderThumbs(); photosChanged();
+  }
+  wireDrop('dropPhoto', 'filePhoto', async (files) => {
+    let n = 0; for(const f of files){ if(isImage(f)){ addCand(f); n++; } }
+    if(n) await afterAdd(n);
+  });
+  function renderThumbs(){
+    const t = $('thumbs');
+    const selected = state.cands.filter(c => c.sel).sort((a,b) => (a.order||0) - (b.order||0));
+    $('pbar').hidden = !state.cands.length;
+    $('pcount').textContent = `보고서에 넣을 사진 ${selected.length}장 / 전체 ${state.cands.length}장`;
+    $('phint').hidden = !state.cands.length || selected.length > 0;
+    t.innerHTML = state.cands.map((c,i) => {
+      const no = c.sel ? selected.indexOf(c) + 1 : 0;
+      return `<div class="${c.sel ? 'sel' : ''}" data-i="${i}" title="${c.sel ? '눌러서 빼기' : '눌러서 보고서에 넣기'}"><img src="${c.url}" alt="" loading="lazy">${no ? `<span class="no">${no}</span>` : '<span class="chk"></span>'}<span class="tag">${c.sel ? '✓ 보고서에 넣음' : '＋ 눌러서 선택'}</span><button data-x="${i}" title="목록에서 빼기">✕</button></div>`;
+    }).join('');
+    t.querySelectorAll('div[data-i]').forEach(d => d.onclick = async (e) => {
+      const c = state.cands[+d.dataset.i]; if(!c) return;
+      if(e.target.dataset.x !== undefined){ if(c.file) URL.revokeObjectURL(c.url); state.cands.splice(+e.target.dataset.x, 1); }
+      else await selectCand(c, !c.sel);
+      // keep selection order for the report
+      state.photos = state.cands.filter(x => x.sel && x.entry).sort((a,b) => (a.order||0) - (b.order||0)).map(x => x.entry);
+      renderThumbs(); photosChanged();
+    });
+  }
+  $('pAll').onclick = async () => { setStatus('사진 정리 중…', 'busy'); for(const c of state.cands) if(!c.sel) await selectCand(c, true); setStatus(''); syncPhotos(); renderThumbs(); photosChanged(); };
+  $('pNone').onclick = () => { state.cands.forEach(c => c.sel = false); syncPhotos(); renderThumbs(); photosChanged(); };
+  function photosChanged(){
+    state.photosDirty = true;
+    if(state.report){ const ph = $('report').querySelector('.photos'); if(ph) ph.outerHTML = photosHtml(); queueSave(1000); }
+  }
+
+  // ---------- prompt ----------
+  const SCHEMA = `{
+  "title": "보고서 제목 (예: GMEP 일일 출장보고서 — Day 3 (11.4.) 베를린 파트너 방문)",
+  "basic": [["일자","2026. 11. 2.(월) — 베를린 1주차 1일차"],["프로그램명","..."],["주관·운영","..."],["장소","..."],["참석자","..."],["관련 기안","문서번호·제목 (기안문에 있을 때만)"],["계획 대비","기안문 일정과 비교한 이행 여부"]],
+  "schedule": [["09:30","프로그램명","수행 내용 (개조식 한 줄)"]],
+  "education": [{"title":"3-1. 세션명","items":[{"t":"핵심 항목","sub":["세부 내용"]}],"table":{"head":["분야","전문가"],"rows":[["...","..."]]}}],
+  "achievements": [{"t":"성과 제목","sub":["세부"]}],
+  "special": [{"t":"별도 성과·미팅 제목","sub":["세부"]}],
+  "insights": [{"t":"시사점 제목","sub":["세부"]}],
+  "plans": ["향후 계획 한 줄"],
+  "attachments": ["첨부 자료명"]
+}`;
+
+  function buildPrompt(extra){
+    const company = $('company').value.trim() || '(미입력)';
+    const sched = [$('schedule').value.trim(), ...state.schedFiles.filter(d=>d.text).map(d => `# ${d.name}\n${d.text}`)].filter(Boolean).join('\n\n');
+    let edu = state.eduFiles.filter(d=>d.text).map(d => `# ${d.name}\n${d.text}`).join('\n\n');
+    if(edu.length > 45000) edu = edu.slice(0, 45000) + '\n…(이하 생략)';
+    const eduNames = state.eduFiles.map(d => d.name);
+    return `당신은 한국 스타트업 대표의 정부지원사업(2026 글로벌 액셀러레이팅 지원사업, GMEP) 해외 현지 프로그램 '일일 출장 결과보고서'를 작성합니다. 이 보고서는 사업비(여비) 집행 증빙으로 전담기관에 제출됩니다.
+
+[작성 규칙]
+- 모든 문장은 개조식. "~습니다/~했다/~함." 같은 서술형 어미 금지, 명사형·체언 종결 (예: "온보딩 완료", "전략 수립 필요").
+- 성실하고 적극적으로 참여한 것이 드러나는 긍정적 톤. 단, 입력에 없는 사실(미팅 상대, 계약, 수치, 연사 발언)은 지어내지 말 것.
+- 일정 항목별 '수행 내용'은 일정·교육자료에서 확인되는 내용으로 구체적으로. 연기·취소된 세션이 자료에 보이면 "연기"로 표시.
+- education: 교육자료가 있으면 세션별 핵심 내용을 3~6개 항목으로 요약(통계·사례 포함). 교육자료가 없으면 일정에서 알 수 있는 범위에서 간략히. 전문가 명단 등은 table로.
+- achievements: 프로그램 참여로 얻은 성과 3~5개 (거점·네트워크·역량·시장 이해 등).
+- special: 아래 '특이사항'에 적힌 별도 성과·미팅만 정리. 특이사항이 비어 있으면 빈 배열.
+- insights: 반드시 이 회사의 사업·제품 관점에서 "현장에서 직접 느낀 인사이트"처럼 4~6개. 교육 내용을 회사 제품·고객·GTM에 연결 (예: 현지 규제 → 제품 기능 현지화, 구매 구조 → 영업 방식 전환). 일반론 금지.
+- plans: 다음 일정 대비 및 후속 조치 3~5개.
+- attachments: 받은 교육자료 이름을 한국어로 알기 쉽게 정리 + 출장 기안문.
+- 계획 대비: 기안문 일정표에서 해당 날짜 계획을 찾아 "계획대로 이행" 등으로 기술.
+- 날짜 표기는 "2026. 11. 2.(월)" 형식, 1주차 몇일차인지 기안 일정으로 추정 가능하면 표기.
+
+[회사 정보]
+- 회사명: ${company}
+- 출장자: ${$('attendees').value.trim() || '(기안문 참조)'}
+- 사업·제품: ${$('intro').value.trim() || '(기안문에서 파악)'}
+
+[보고 일자] ${$('date').value}
+
+[사전 출장 기안문]
+${state.planText || (state.planImage ? '(이미지로 첨부)' : '(없음)')}
+
+[운영사 제공 그날 일정]
+${sched || '(첨부 이미지 참조)'}
+
+[교육자료${eduNames.length ? ' — ' + eduNames.join(', ') : ''}]
+${edu || '(없음)'}
+
+[특이사항 — 별도 성과·미팅 등]
+${$('special').value.trim() || '(없음)'}
+${extra || ''}
+[출력] 아래 JSON 하나만 출력 (설명·코드블록 없이). 키 이름은 그대로 유지:
+${SCHEMA}`;
+  }
+
+  function collectImages(){
+    const imgs = [];
+    if(state.planImage) imgs.push(state.planImage);
+    state.schedFiles.forEach(d => d.image && imgs.push(d.image));
+    state.eduFiles.forEach(d => d.image && imgs.push(d.image));
+    return imgs;
+  }
+
+  async function runModel(prompt){
+    if(!sample) throw new Error('이 화면에서는 AI 작성을 쓸 수 없습니다. claude.ai에서 이 페이지를 열어 주세요.');
+    const images = collectImages();
+    const opts = { modelTier:'complex' };
+    if(images.length){
+      let lim = null; try{ lim = await sample.limits(); }catch(e){}
+      if(lim && lim.images) opts.images = images.slice(0, 8);
+    }
+    return await sample.json(prompt, opts);
+  }
+
+  // ---------- generate ----------
+  $('btnGen').onclick = async () => {
+    if(!comp.sel || !$('company').value.trim()){ setStatus('1번에서 회사를 고르거나 새로 등록해 주세요.', 'err'); return; }
+    if(!state.planText && !state.planImage){ setStatus('사전 출장 기안문을 먼저 올려 주세요.', 'err'); return; }
+    if(!$('schedule').value.trim() && !state.schedFiles.length){ setStatus('운영사 제공 일정을 붙여 넣거나 파일로 올려 주세요.', 'err'); return; }
+    saveProfile();
+    $('btnGen').disabled = true;
+    setStatus('보고서 작성 중… (교육자료 분량에 따라 1~2분)', 'busy');
+    try{
+      const r = await runModel(buildPrompt());
+      state.report = normalize(r);
+      state.reportDate = $('date').value || new Date().toISOString().slice(0,10);
+      state.reportKey = `${state.reportDate}__${comp.sel.id}`;
+      state.photosDirty = true;
+      renderReport(state.report);
+      await saveCurrent();
+      setStatus('완성. 보관함에 저장했습니다. 확인·수정 후 Word로 받으세요.');
+    }catch(err){
+      setStatus(errMsg(err), 'err');
+    }finally{ $('btnGen').disabled = false; }
+  };
+
+  $('btnRevise').onclick = async () => {
+    const ask = $('revise').value.trim(); if(!ask) return;
+    $('btnRevise').disabled = true;
+    setStatus('수정 반영 중…', 'busy');
+    try{
+      const current = $('report').innerText.slice(0, 20000);
+      const r = await runModel(buildPrompt(`\n[현재 보고서 (사용자가 직접 고친 내용 포함 — 요청한 부분 외에는 그대로 유지)]\n${current}\n\n[수정 요청]\n${ask}\n`));
+      state.report = normalize(r);
+      if(!state.reportKey){ state.reportDate = $('date').value; state.reportKey = `${state.reportDate}__${comp.sel.id}`; }
+      renderReport(state.report);
+      queueSave(300);
+      $('revise').value = '';
+      setStatus('반영 완료.');
+    }catch(err){ setStatus(errMsg(err), 'err'); }
+    finally{ $('btnRevise').disabled = false; }
+  };
+  $('revise').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.isComposing) $('btnRevise').click(); });
+
+  function errMsg(err){
+    const c = err && err.code;
+    if(c === 'not_granted') return 'AI 사용이 허용되지 않았습니다. 다시 눌러 허용해 주세요.';
+    if(c === 'rate_limited') return '요청이 많습니다. 잠시 후 다시 눌러 주세요.';
+    return (err && err.message) || '작성 중 오류가 났습니다. 다시 시도해 주세요.';
+  }
+
+  function arr(x){ return Array.isArray(x) ? x : []; }
+  function item(x){ return typeof x === 'string' ? {t:x, sub:[]} : {t:String(x?.t ?? ''), sub:arr(x?.sub).map(String)}; }
+  function normalize(r){
+    r = r || {};
+    return {
+      title: r.title || 'GMEP 일일 출장보고서',
+      basic: arr(r.basic).filter(x => Array.isArray(x) && x[1]),
+      schedule: arr(r.schedule).filter(Array.isArray),
+      education: arr(r.education).map(s => ({title:String(s?.title||''), items:arr(s?.items).map(item), table: s?.table && arr(s.table.rows).length ? s.table : null})),
+      achievements: arr(r.achievements).map(item),
+      special: arr(r.special).map(item),
+      insights: arr(r.insights).map(item),
+      plans: arr(r.plans).map(String),
+      attachments: arr(r.attachments).map(String)
+    };
+  }
+
+  // ---------- render ----------
+  function ul(items, boldTop){
+    if(!items.length) return '';
+    return '<ul>' + items.map(it => {
+      const t = esc(it.t);
+      const sub = it.sub && it.sub.length ? '<ul>' + it.sub.map(s => `<li>${esc(s)}</li>`).join('') + '</ul>' : '';
+      return `<li>${boldTop && sub ? '<strong>'+t+'</strong>' : t}${sub}</li>`;
+    }).join('') + '</ul>';
+  }
+  function table(head, rows, cls){
+    return `<table${cls ? ` class="${cls}"` : ''}>` + (head ? '<tr>' + head.map(h => `<th>${esc(h)}</th>`).join('') + '</tr>' : '') +
+      rows.map(r => '<tr>' + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>').join('') + '</table>';
+  }
+  function renderReport(r){
+    let n = 0, h = `<h1>${esc(r.title)}</h1>`;
+    h += `<h2>${++n}. 기본 정보</h2>` + table(null, r.basic, 'kv');
+    if(r.schedule.length) h += `<h2>${++n}. 일정 및 수행 내용</h2>` + table(['시간','프로그램','수행 내용'], r.schedule.map(x => [x[0]||'',x[1]||'',x[2]||'']));
+    if(r.education.length){
+      h += `<h2>${++n}. 세부 교육 내용</h2>`;
+      r.education.forEach(s => {
+        if(s.title) h += `<h3>${esc(s.title)}</h3>`;
+        if(s.table) h += table(arr(s.table.head).map(String), arr(s.table.rows).map(rr => arr(rr).map(String)));
+        h += ul(s.items, true);
+      });
+    }
+    if(r.achievements.length) h += `<h2>${++n}. 주요 성과</h2>` + ul(r.achievements, true);
+    if(r.special.length) h += `<h2>${++n}. 특이사항 (별도 성과·미팅)</h2>` + ul(r.special, true);
+    if(r.insights.length || r.plans.length){
+      h += `<h2>${++n}. 시사점 및 향후 계획</h2>`;
+      if(r.insights.length) h += `<h3>시사점</h3>` + ul(r.insights, true);
+      if(r.plans.length) h += `<h3>향후 계획</h3>` + ul(r.plans.map(item), false);
+    }
+    h += `<h2>${++n}. 참여 사진</h2>` + photosHtml();
+    if(r.attachments.length) h += `<h2>${++n}. 첨부</h2>` + ul(r.attachments.map(item), false);
+    $('report').innerHTML = h;
+    enableReport();
+  }
+  function enableReport(){
+    $('report').contentEditable = 'true';
+    ['btnDocx','btnCopy','revise','btnRevise'].forEach(id => $(id).disabled = false);
+  }
+  function photosHtml(){
+    if(!state.photos.length) return '<div class="photos" contenteditable="false"><p style="color:#9aa1ab">(왼쪽 5번에서 고른 사진이 여기에 들어갑니다)</p></div>';
+    return '<div class="photos" contenteditable="false">' + state.photos.map((p,i) => `<img src="${p.dataUrl}" data-i="${i}" alt="">`).join('') + '</div>';
+  }
+
+  // ---------- copy ----------
+  $('btnCopy').onclick = async () => {
+    try{ await navigator.clipboard.writeText($('report').innerText); setStatus('본문을 복사했습니다.'); }
+    catch(e){ setStatus('복사가 막혀 있습니다. 미리보기에서 직접 선택해 복사해 주세요.', 'err'); }
+  };
+
+  // ---------- docx ----------
+  const FONT = '맑은 고딕';
+  function runsOf(node, base){
+    const D = window.docx, out = [];
+    node.childNodes.forEach(ch => {
+      if(ch.nodeType === 3){ const t = ch.textContent.replace(/\s+/g,' '); if(t) out.push(new D.TextRun({text:t, font:FONT, size:20, ...base})); }
+      else if(ch.nodeType === 1 && !['UL','OL','TABLE'].includes(ch.tagName)){
+        const b = ['STRONG','B'].includes(ch.tagName) ? {...base, bold:true} : base;
+        if(ch.tagName === 'BR') out.push(new D.TextRun({break:1}));
+        else out.push(...runsOf(ch, b));
+      }
+    });
+    return out;
+  }
+  function listParas(ulEl, level, acc){
+    const D = window.docx;
+    [...ulEl.children].forEach(li => {
+      if(li.tagName !== 'LI') return;
+      acc.push(new D.Paragraph({ children: runsOf(li, {}), numbering:{reference:'bul', level}, spacing:{after:40} }));
+      li.querySelectorAll(':scope > ul, :scope > ol').forEach(sub => listParas(sub, Math.min(level+1, 2), acc));
+    });
+    return acc;
+  }
+  function tableOf(tbl){
+    const D = window.docx;
+    const rows = [...tbl.querySelectorAll('tr')];
+    const cols = Math.max(...rows.map(r => r.children.length));
+    const total = 9638;
+    let widths;
+    if(tbl.classList.contains('kv')) widths = [1800, total-1800];
+    else if(cols === 3) widths = [1300, 2900, total-4200];
+    else widths = Array(cols).fill(Math.floor(total/cols));
+    return new D.Table({
+      width:{size:total, type:D.WidthType.DXA}, columnWidths:widths,
+      rows: rows.map(tr => new D.TableRow({ children: [...tr.children].map((c,ci) => {
+        const head = c.tagName === 'TH' || (tbl.classList.contains('kv') && ci === 0);
+        return new D.TableCell({
+          width:{size:widths[ci]||widths[widths.length-1], type:D.WidthType.DXA},
+          shading: head ? {type:D.ShadingType.CLEAR, color:'auto', fill:'EEF1F5'} : undefined,
+          margins:{top:60,bottom:60,left:100,right:100},
+          children:[ new D.Paragraph({ children: runsOf(c, head ? {bold:true} : {}) }) ]
+        });
+      })}))
+    });
+  }
+  function dataUrlBytes(u){
+    const b = atob(u.split(',')[1]); const a = new Uint8Array(b.length);
+    for(let i=0;i<b.length;i++) a[i] = b.charCodeAt(i);
+    return a;
+  }
+  function docChildren(root, photos){
+    const D = window.docx;
+    const children = [];
+    for(const el of root.children){
+      const tag = el.tagName;
+      if(tag === 'H1') children.push(new D.Paragraph({ heading:D.HeadingLevel.TITLE, alignment:D.AlignmentType.CENTER, children:[new D.TextRun({text:el.textContent.trim(), font:FONT, size:32, bold:true, color:'1D2330'})], spacing:{after:240} }));
+      else if(tag === 'H2') children.push(new D.Paragraph({ heading:D.HeadingLevel.HEADING_1, children:[new D.TextRun({text:el.textContent.trim(), font:FONT, size:26, bold:true, color:'1D2330'})], spacing:{before:320, after:120}, keepNext:true, border:{bottom:{style:D.BorderStyle.SINGLE, size:8, color:'1D2330', space:2}} }));
+      else if(tag === 'H3') children.push(new D.Paragraph({ heading:D.HeadingLevel.HEADING_2, children:[new D.TextRun({text:el.textContent.trim(), font:FONT, size:22, bold:true, color:'1D2330'})], spacing:{before:180, after:80}, keepNext:true }));
+      else if(tag === 'P') { if(el.textContent.trim()) children.push(new D.Paragraph({ children: runsOf(el, {}) })); }
+      else if(tag === 'UL' || tag === 'OL') listParas(el, 0, children);
+      else if(tag === 'TABLE'){ children.push(tableOf(el)); children.push(new D.Paragraph({children:[]})); }
+      else if(el.classList.contains('photos')){
+        for(const p of photos){
+          const w = 600, h = Math.round(p.h * w / p.w);
+          children.push(new D.Paragraph({ alignment:D.AlignmentType.CENTER, spacing:{after:160},
+            children:[ new D.ImageRun({ type:'jpg', data:dataUrlBytes(p.dataUrl), transformation:{width:w, height:h} }) ] }));
+        }
+      }
+      else if((el.textContent || '').trim()) children.push(new D.Paragraph({ children: runsOf(el, {}) }));
+    }
+    return children;
+  }
+  async function buildDocx(parts){
+    const D = window.docx;
+    if(!D) throw new Error('Word 변환 도구를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+    parts = parts || [{root:$('report'), photos:state.photos}];
+    let children = [];
+    parts.forEach((p, i) => {
+      if(i > 0) children.push(new D.Paragraph({ children:[ new D.PageBreak() ] }));
+      children = children.concat(docChildren(p.root, p.photos));
+    });
+    const doc = new D.Document({
+      styles:{ default:{ document:{ run:{ font:FONT, size:20 } } } },
+      numbering:{ config:[{ reference:'bul', levels:[
+        { level:0, format:D.LevelFormat.BULLET, text:'□', alignment:D.AlignmentType.LEFT, style:{ paragraph:{ indent:{ left:400, hanging:280 } } } },
+        { level:1, format:D.LevelFormat.BULLET, text:'-', alignment:D.AlignmentType.LEFT, style:{ paragraph:{ indent:{ left:800, hanging:280 } } } },
+        { level:2, format:D.LevelFormat.BULLET, text:'·', alignment:D.AlignmentType.LEFT, style:{ paragraph:{ indent:{ left:1200, hanging:280 } } } }
+      ]}]},
+      sections:[{ properties:{ page:{ margin:{ top:1134, bottom:1134, left:1134, right:1134 } } }, children }]
+    });
+    return await D.Packer.toBlob(doc);
+  }
+  window.__buildDocx = buildDocx; // for testing
+
+  const companySafe = () => ($('company').value.trim() || '회사').replace(/[\\/:*?"<>|]/g,'');
+  async function offer(blob, fname){
+    if(!downloads){ setStatus('이 화면에서는 다운로드를 쓸 수 없습니다. claude.ai에서 열어 주세요.', 'err'); return; }
+    await downloads.save({ filename: fname, data: blob });
+    setStatus('Word 파일을 저장했습니다.');
+  }
+  $('btnAll').onclick = async () => {
+    try{
+      if(!archive.length) return;
+      setStatus('전체 합본 만드는 중…', 'busy');
+      const parts = [];
+      for(const meta of [...archive].sort((a,b) => a.date < b.date ? -1 : 1)){
+        const r = await reportLoad(meta.key); if(!r) continue;
+        const root = document.createElement('div'); root.innerHTML = sanitize(r.rec.html || '');
+        parts.push({root, photos:r.photos});
+      }
+      const blob = await buildDocx(parts);
+      const first = archive[archive.length-1].date, last = archive[0].date;
+      await offer(blob, `GMEP_출장결과보고서_합본_${first}~${last}_${companySafe()}.docx`);
+    }catch(err){ docxErr(err); }
+  };
+  function docxErr(err){
+    const c = err && err.code;
+    if(c === 'declined') setStatus('다운로드를 취소했습니다.');
+    else if(c === 'rate_limited') setStatus('저장 창이 이미 열려 있습니다. 잠시 후 다시 눌러 주세요.', 'err');
+    else setStatus((err && err.message) || 'Word 파일을 만들지 못했습니다.', 'err');
+  }
+  $('btnDocx').onclick = async () => {
+    try{
+      setStatus('Word 파일 만드는 중…', 'busy');
+      const blob = await buildDocx();
+      await offer(blob, `GMEP_일일출장보고서_${state.reportDate || $('date').value || ''}_${companySafe()}.docx`);
+    }catch(err){
+      const c = err && err.code;
+      if(c === 'declined') setStatus('다운로드를 취소했습니다.');
+      else if(c === 'rate_limited') setStatus('저장 창이 이미 열려 있습니다. 잠시 후 다시 눌러 주세요.', 'err');
+      else setStatus((err && err.message) || 'Word 파일을 만들지 못했습니다.', 'err');
+    }
+  };
+
+  window.__state = state; window.__render = (r) => { state.report = normalize(r); state.reportDate = $('date').value; state.reportKey = `${state.reportDate}__${comp.sel.id}`; state.photosDirty = true; renderReport(state.report); return saveCurrent(); };
+  window.__open = openReport; window.__store = store;
+  (async () => {
+    await storeInit();
+    const p = await profileLoad();
+    comp.list = await companiesLoad();
+    // migrate old single-profile data
+    if(p && p.company && !comp.list.some(c => c.name === p.company)){
+      const c = { id:newCompanyId(), name:p.company, attendees:p.attendees||'', intro:p.intro||'', planText:p.planText||'', planName:p.planName||'' };
+      try{ await companyPut(c); comp.list.push(c); p.companyId = c.id; }catch(e){}
+    }
+    let pick = (p && p.companyId && comp.list.find(c => c.id === p.companyId)) || (store.uid && comp.list.find(c => c.id === store.uid)) || null;
+    comp.sel = pick;
+    renderCompanySel(); fillCompany();
+    if(!comp.list.length) await selectCompany('__new');
+    await refreshArchive();
+  })();
+})();
+</script>
+</body>
+</html>
