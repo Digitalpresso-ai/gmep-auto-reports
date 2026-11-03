@@ -130,6 +130,18 @@ describe("FUNC-17 입력 초안 자동 저장", () => {
     const shared = (await (await day(a.cookie)).json()).photos[0];
     expect((await saveDraft(a.cookie, { selectedPhotos: [{ source: "shared", id: shared.id }] }, "2026-11-03")).status).toBe(400);
   });
+
+  it("관리자가 지운 공통 사진은 선택에서 빼고 돌려줘 그대로 다시 저장할 수 있다", async () => {
+    const [gone] = await t.sql`insert into shared_files (report_date, kind, storage_path, filename, width, height)
+      values (${date}, 'photo', 'shared/2026-11-02/gone.jpg', 'gone.jpg', 1100, 825) returning id`;
+    const kept = (await (await day(a.cookie)).json()).photos[0];
+    const both = [{ source: "shared", id: kept.id }, { source: "shared", id: gone.id }];
+    expect((await saveDraft(a.cookie, { selectedPhotos: both })).status).toBe(200);
+    await t.sql`delete from shared_files where id = ${gone.id}`;
+    const body = await (await day(a.cookie)).json();
+    expect(body.selectedPhotos).toEqual([{ source: "shared", id: kept.id }]);
+    expect((await saveDraft(a.cookie, { selectedPhotos: body.selectedPhotos })).status).toBe(200);
+  });
 });
 
 describe("SHARED-3·AUTH-8 회사가 추가한 사진", () => {

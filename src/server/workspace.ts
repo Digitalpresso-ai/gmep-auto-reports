@@ -47,6 +47,8 @@ export async function getDayView(companyId: string, date: string): Promise<DayVi
     select title, updated_at from reports where company_id = ${companyId} and report_date = ${date}`;
   const ownUrls = await signedUrls(own.map((p) => p.storage_path));
   const sharedPhotos = (shared?.files ?? []).filter((f) => f.kind === "photo");
+  // 관리자가 지운 공통 사진이 초안에 남아 있으면 브라우저가 그대로 다시 보내 저장이 거부되므로 여기서 뺀다
+  const exists = new Set([...sharedPhotos.map((f) => `shared:${f.id}`), ...own.map((p) => `company:${p.id}`)]);
   return {
     date,
     hasShared: shared !== null,
@@ -58,7 +60,7 @@ export async function getDayView(companyId: string, date: string): Promise<DayVi
       ...sharedPhotos.map((f) => ({ source: "shared" as const, id: f.id, filename: f.filename, width: f.width, height: f.height, url: f.url })),
       ...own.map((p) => ({ source: "company" as const, id: p.id, filename: p.filename, width: p.width, height: p.height, url: ownUrls.get(p.storage_path) ?? "" })),
     ],
-    selectedPhotos: draft?.selected_photos ?? [],
+    selectedPhotos: (draft?.selected_photos ?? []).filter((r) => exists.has(`${r.source}:${r.id}`)),
     notes: draft?.notes ?? "",
     report: report ? { title: report.title, updatedAt: report.updated_at.toISOString() } : null,
     usage: usageView(usage),
