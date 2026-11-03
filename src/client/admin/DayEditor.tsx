@@ -7,7 +7,7 @@ import { extractText, imageForm, toJpeg, unzip, uploadOriginal } from "../files"
 type SharedDay = {
   date: string;
   scheduleText: string;
-  files: { id: string; kind: "photo" | "schedule_image"; filename: string; url: string }[];
+  files: { id: string; kind: "photo" | "schedule_image"; filename: string; url: string; description: string | null }[];
   materials: { id: string; kind: "schedule" | "education"; filename: string; chars: number; hasOriginal: boolean }[];
 };
 type Progress = { done: number; total: number; current: string };
@@ -117,6 +117,28 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     setResult(r);
     await reload().catch(() => {});
     onChanged();
+    if (r.counts.photo > 0) await describePhotos();
+  }
+
+  // 사진을 올린 뒤 설명이 없는 사진을 AI로 설명한다(PHOTO-1). 한 번 부를 때 몇 장씩 처리하므로 남은 것이 없거나 더 진행되지 않을 때까지 반복한다.
+  async function describePhotos() {
+    setError("");
+    try {
+      for (;;) {
+        setProgress({ done: 0, total: 0, current: "사진 설명 만드는 중… (보고서에서 사진을 알맞은 항목 옆에 넣는 데 씁니다)" });
+        const r = await api<{ described: number; failed: number; remaining: number }>(`/api/admin/days/${date}/files/describe`, { method: "POST" });
+        await reload().catch(() => {});
+        if (r.remaining === 0) break;
+        if (r.described === 0) {
+          setError(`사진 ${r.remaining}장의 설명을 만들지 못했습니다. 잠시 뒤 '사진 설명 만들기'를 다시 눌러 주세요`);
+          break;
+        }
+      }
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setProgress(null);
+    }
   }
 
   async function download(id: string) {
@@ -141,6 +163,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
 
   const busy = progress !== null;
   const photos = day?.files.filter((f) => f.kind === "photo") ?? [];
+  const undescribed = photos.filter((f) => f.description === null).length;
   const schedImages = day?.files.filter((f) => f.kind === "schedule_image") ?? [];
   const drop = (label: string, accept: string, forced?: Exclude<FileKind, "ignore">) => (
     <label className="drop">
@@ -229,13 +252,19 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
         </div>
         <div>
           <div className="field">
-            <span>공통 사진 {photos.length}장</span>
+            <span>공통 사진 {photos.length}장{photos.length > 0 && ` · 설명 ${photos.length - undescribed}장`}</span>
             {drop("사진 추가", "image/*", "photo")}
+            {undescribed > 0 && !busy && (
+              <div className="row" style={{ marginTop: 8 }}>
+                <button type="button" className="btn btn-small" onClick={describePhotos}>사진 설명 만들기 ({undescribed}장)</button>
+                <span className="hint">설명이 없는 사진은 보고서의 참여 사진 칸에만 들어갑니다</span>
+              </div>
+            )}
             <div className="thumbs">
               {photos.map((f) => (
                 <div key={f.id} className="thumb" style={{ cursor: "default" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={f.url} alt={f.filename} loading="lazy" />
+                  <img src={f.url} alt={f.description ?? f.filename} title={f.description ?? "설명 없음"} loading="lazy" />
                   <button type="button" className="thumb-del" aria-label="사진 지우기" onClick={() => remove(`/api/admin/days/${date}/files/${f.id}`)}>✕</button>
                 </div>
               ))}

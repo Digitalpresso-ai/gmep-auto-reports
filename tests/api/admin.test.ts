@@ -1,9 +1,12 @@
 import bcrypt from "bcryptjs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { ModelRequest, ModelResult } from "@/server/ai";
 import { objects } from "./fake-storage";
 import { companyWithPassword, cookieOf, loginCookie, params, request, startDb, type TestDb } from "./harness";
 
 vi.mock("@/server/storage", () => import("./fake-storage"));
+const callModel = vi.fn<(r: ModelRequest) => Promise<ModelResult>>();
+vi.mock("@/server/ai", () => ({ callModel: (r: ModelRequest) => callModel(r) }));
 
 let t: TestDb;
 let admin: string;
@@ -201,5 +204,44 @@ describe("FUNC-5 교육자료 원본 보관", () => {
     const mats = await import("@/app/api/admin/days/[date]/materials/[id]/route");
     expect((await mats.DELETE(request("DELETE", "/x", { cookie: admin }), params({ date, id: m.id }))).status).toBe(200);
     expect(objects.has(m.storage_path)).toBe(false);
+  });
+});
+
+describe("PHOTO-1 공통 사진 설명", () => {
+  const date = "2026-11-09";
+  const describeAll = async (cookie = admin) =>
+    (await import("@/app/api/admin/days/[date]/files/describe/route")).POST(request("POST", "/x", { cookie }), params({ date }));
+  const answer = (text: string): ModelResult => ({ text, inputTokens: 900, outputTokens: 80, model: "claude-sonnet-5-5", stopReason: "end_turn" });
+
+  it("설명이 없는 공통 사진만 사진 이미지와 함께 AI에 보내 설명을 저장한다. 일정 이미지는 설명하지 않는다", async () => {
+    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
+    for (const kind of ["photo", "photo", "schedule_image"]) await POST(request("POST", "/x", { cookie: admin, form: photoForm(kind) }), params({ date }));
+    callModel.mockReset();
+    callModel
+      .mockResolvedValueOnce(answer(JSON.stringify({ scene: "강연장에서 발표 중인 장면", activity: "강연", visible_text: "Doing Business in Germany" })))
+      .mockRejectedValueOnce(new Error("overloaded"));
+    const res = await describeAll();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ described: 1, failed: 1, remaining: 1 });
+    expect(callModel).toHaveBeenCalledTimes(2);
+    expect(callModel.mock.calls[0][0].images).toHaveLength(1);
+    expect(callModel.mock.calls[0][0].jsonSchema).toBeDefined();
+    const rows = await t.sql<{ kind: string; description: string | null }[]>`select kind, description from shared_files where report_date = ${date} order by kind, description nulls last`;
+    expect(rows).toEqual([
+      { kind: "photo", description: '[강연] 강연장에서 발표 중인 장면 화면 글자: "Doing Business in Germany"' },
+      { kind: "photo", description: null },
+      { kind: "schedule_image", description: null },
+    ]);
+  });
+
+  it("실패해 남은 사진은 다시 부르면 그것만 설명한다", async () => {
+    callModel.mockReset();
+    callModel.mockResolvedValueOnce(answer(JSON.stringify({ scene: "단체 사진", activity: "단체사진", visible_text: "" })));
+    expect(await (await describeAll()).json()).toEqual({ described: 1, failed: 0, remaining: 0 });
+    expect(callModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("관리자 쿠키가 없으면 401이다", async () => {
+    expect((await describeAll("")).status).toBe(401);
   });
 });
