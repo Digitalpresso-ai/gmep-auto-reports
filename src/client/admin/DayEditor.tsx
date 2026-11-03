@@ -19,7 +19,7 @@ const DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1jvtDdOoi5qedcI
 const KIND_LABEL: Record<Exclude<FileKind, "ignore">, string> = { photo: "사진", schedule_image: "일정 이미지", schedule: "일정 문서", education: "교육자료" };
 
 // A2 공통 자료 편집 · A3 처리 중 · A4 일부 실패
-export function DayEditor({ date, onChanged }: { date: string; onChanged: () => void }) {
+export function DayEditor({ date }: { date: string }) {
   const [day, setDay] = useState<SharedDay | null>(null);
   const [schedule, setSchedule] = useState("");
   const [savedSchedule, setSavedSchedule] = useState("");
@@ -56,7 +56,6 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     try {
       await api(`/api/admin/days/${date}`, { method: "PUT", body: { scheduleText: schedule } });
       setSavedSchedule(schedule);
-      onChanged();
     } catch (e) {
       setError(errorText(e));
     }
@@ -118,7 +117,6 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     setProgress(null);
     setResult(r);
     await reload().catch(() => {});
-    onChanged();
     if (r.counts.photo > 0) await describePhotos();
   }
 
@@ -157,7 +155,6 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
     try {
       await api(path, { method: "DELETE" });
       await reload();
-      onChanged();
     } catch (e) {
       setError(errorText(e));
     }

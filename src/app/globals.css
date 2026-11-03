@@ -254,12 +254,6 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .secret { font-family: ui-monospace, Menlo, monospace; font-size: 18px; letter-spacing: 0.06em; background: var(--surface-subtle); color: var(--dp-brand); padding: 8px 12px; border-radius: var(--radius-md); display: inline-block; user-select: all; }
 .row-end { justify-content: flex-end; }
-.work-admin { grid-template-columns: 300px 1fr; }
-@media (max-width: 1000px) {
-  .work-admin { grid-template-columns: 1fr; }
-  /* 휴대폰에서는 날짜 목록이 편집 영역을 밀어내지 않도록 높이를 제한한다 */
-  .day-list { max-height: 216px; overflow-y: auto; }
-}
 /* 휴대폰에서는 회사 표를 행마다 카드로 보여 준다 */
 @media (max-width: 640px) {
   .table-stack thead { display: none; }
@@ -285,7 +279,5 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
 .fname:hover, .fname:focus-visible, .fcell:hover .fname { white-space: normal; overflow-wrap: anywhere; }
 .thumbs-wide { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 @media (max-width: 420px) { .thumbs-wide { grid-template-columns: repeat(3, 1fr); } }
-/* 날짜 목록은 스크롤 영역이라 바깥 outline이 잘린다. 선택 표시는 안쪽 그림자로 그린다. */
-.day-list li { cursor: pointer; }
-.day-list li.on { box-shadow: inset 0 0 0 2px var(--dp-brand); background: var(--surface-subtle); }
-.day-list li > .meta { flex-shrink: 1; min-width: 0; text-align: right; }
+.date-pick { max-width: 280px; margin: 0 0 16px; }
+@media (max-width: 640px) { .date-pick { max-width: none; } }

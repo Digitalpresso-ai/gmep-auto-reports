@@ -1,21 +1,18 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, errorText, fmtDate, kstToday } from "../api";
+import { ApiError, api, errorText, kstToday } from "../api";
 import { Companies } from "./Companies";
 import { DayEditor } from "./DayEditor";
 
-type DayRow = { date: string; hasSchedule: boolean; photos: number; scheduleImages: number; materials: number };
-
-// A0 관리자 로그인 → A1 날짜별 공통 자료 목록 → A2 편집 / A5 회사 관리
+// A0 관리자 로그인 → A2 날짜를 골라 공통 자료 편집 / A5 회사 관리
 export function AdminApp() {
   const [view, setView] = useState<"loading" | "login" | "days" | "companies">("loading");
-  const [days, setDays] = useState<DayRow[]>([]);
   // 사전 렌더에서 현재 시각을 읽지 않도록 오늘 날짜는 세션 확인 뒤에 정한다
   const [date, setDate] = useState("");
 
-  const loadDays = useCallback(async () => {
+  const checkSession = useCallback(async () => {
     try {
-      setDays(await api<DayRow[]>("/api/admin/days"));
+      await api("/api/admin/days");
       return true;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setView("login");
@@ -26,8 +23,8 @@ export function AdminApp() {
   useEffect(() => {
     // 첫 화면은 관리자 세션 확인 결과로 정한다
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadDays().then((ok) => ok && (setDate(kstToday()), setView("days")));
-  }, [loadDays]);
+    checkSession().then((ok) => ok && (setDate(kstToday()), setView("days")));
+  }, [checkSession]);
 
   async function logout() {
     await api("/api/admin/logout", { method: "POST" }).catch(() => {});
@@ -35,9 +32,7 @@ export function AdminApp() {
   }
 
   if (view === "loading") return <p className="narrow hint"><span className="spin" /> 불러오는 중…</p>;
-  if (view === "login") return <AdminLogin onDone={() => loadDays().then((ok) => ok && (setDate(kstToday()), setView("days")))} />;
-
-  const listed = days.some((d) => d.date === date) ? days : [{ date, hasSchedule: false, photos: 0, scheduleImages: 0, materials: 0 }, ...days];
+  if (view === "login") return <AdminLogin onDone={() => checkSession().then((ok) => ok && (setDate(kstToday()), setView("days")))} />;
 
   return (
     <>
@@ -55,23 +50,13 @@ export function AdminApp() {
         </div>
         {view === "companies" && <Companies />}
         {view === "days" && (
-          <div className="work work-admin">
-            <section className="card">
-              <h2>보고 일자</h2>
+          <>
+            <label className="field date-pick">
+              <span>보고 일자</span>
               <input className="input" type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} />
-              <ul className="files day-list">
-                {listed.map((d) => (
-                  <li key={d.date} className={d.date === date ? "on" : undefined} onClick={() => setDate(d.date)}>
-                    <b>{fmtDate(d.date)}</b>
-                    <span className="meta">
-                      {d.hasSchedule || d.scheduleImages ? "일정" : "일정 없음"} · 사진 {d.photos} · 자료 {d.materials}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-            <DayEditor key={date} date={date} onChanged={loadDays} />
-          </div>
+            </label>
+            <DayEditor key={date} date={date} />
+          </>
         )}
       </div>
     </>
