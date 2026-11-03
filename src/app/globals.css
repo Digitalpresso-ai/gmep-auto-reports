@@ -281,3 +281,7 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
 .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .files li .row { flex-wrap: nowrap; }
 .work > *, .grid2 > * { min-width: 0; }
+/* 마우스를 올리거나 키보드로 고르면 줄인 이름을 전체로 펼친다 */
+.fname:hover, .fname:focus-visible, .fcell:hover .fname { white-space: normal; overflow-wrap: anywhere; }
+.thumbs-wide { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@media (max-width: 420px) { .thumbs-wide { grid-template-columns: repeat(3, 1fr); } }

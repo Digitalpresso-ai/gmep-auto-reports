@@ -203,7 +203,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
       )}
       {error && <div className="msg msg-err">{error}</div>}
 
-      <div className="grid2" style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 16 }}>
         <div>
           <label className="field">
             <span>그날 일정 (텍스트)</span>
@@ -262,7 +262,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
                 <span className="hint">설명이 없는 사진은 보고서의 참여 사진 칸에만 들어갑니다</span>
               </div>
             )}
-            <div className="thumbs">
+            <div className="thumbs thumbs-wide">
               {photos.map((f) => (
                 <div key={f.id} className="thumb" style={{ cursor: "default" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
