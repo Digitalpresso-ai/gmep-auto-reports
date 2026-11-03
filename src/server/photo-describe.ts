@@ -24,12 +24,11 @@ export function describeText(v: { scene?: unknown; activity?: unknown; visible_t
   return [s(v.activity) && `[${s(v.activity)}]`, s(v.scene), s(v.visible_text) && `화면 글자: "${s(v.visible_text)}"`].filter(Boolean).join(" ").slice(0, 2000);
 }
 
-async function describeOne(model: string, path: string): Promise<string> {
-  const bytes = await getObject(path);
+export async function describeImage(model: string, bytes: Uint8Array, mediaType: "image/jpeg" | "image/png"): Promise<string> {
   const res = await callModel({
     model,
     prompt: PROMPT,
-    images: [{ mediaType: path.endsWith(".png") ? "image/png" : "image/jpeg", base64: Buffer.from(bytes).toString("base64") }],
+    images: [{ mediaType, base64: Buffer.from(bytes).toString("base64") }],
     jsonSchema: SCHEMA,
     maxTokens: 2_000,
     effort: "low",
@@ -46,7 +45,7 @@ export async function describePendingPhotos(date: string, limit: number): Promis
   const results = await Promise.all(
     rows.map(async (r) => {
       try {
-        const description = await describeOne(model, r.storage_path);
+        const description = await describeImage(model, await getObject(r.storage_path), r.storage_path.endsWith(".png") ? "image/png" : "image/jpeg");
         await sql`update shared_files set description = ${description} where id = ${r.id}`;
         return true;
       } catch (e) {
