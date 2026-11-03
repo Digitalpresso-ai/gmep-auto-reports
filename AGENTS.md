@@ -6,7 +6,7 @@
 - 개발·검증은 [개발 스킬](.agents/skills/proofstill-develop/SKILL.md)과 [독립 검증 스킬](.agents/skills/proofstill-verify/SKILL.md)을 따른다. CLI는 `python3 .proofstill-runtime/bin/proofstill --root . --help`이며 독립 리뷰(`review`)에는 로그인한 Codex CLI가 필요하다. 공유 로컬 파일에 대한 보안 격리를 제공하지는 않는다.
 - 새 프로젝트나 중요한 기술 변경은 [시니어 개발자 인터뷰](.agents/skills/proofstill-engineer/SKILL.md)로 구현 가능성과 아키텍처를 사용자와 논의한다. 스택·폴더 구조는 사용자 결정을 받은 뒤 확정하고 생성·구현한다. 확정 전에는 제품 디렉터리·패키지 설치를 하지 않는다.
 - API 계약·OpenAPI·API Tracker 작업은 [proofstill-api](.agents/skills/proofstill-api/SKILL.md), DB 스키마·migration은 [proofstill-db](.agents/skills/proofstill-db/SKILL.md)를 따른다.
-- UI는 [jwdesign](.agents/skills/jwdesign/SKILL.md) 토큰과 컴포넌트를 우선하고 화면 구성에 [design-taste-frontend](.agents/skills/design-taste-frontend/SKILL.md)를 적용한다. 충돌 시 jwdesign을 따른다. UI 변경은 요청한 화면·행동에 필요한 최소 범위로 제한한다. 프로토타입 화면 구성은 재사용 대상이다.
+- UI는 digitalpresso-design 스킬(디지털프레소 디자인 시스템)의 토큰과 컴포넌트를 우선하고 화면 구성에 [design-taste-frontend](.agents/skills/design-taste-frontend/SKILL.md)를 적용한다. 충돌 시 digitalpresso-design을 따른다. jwdesign은 쓰지 않는다(2026-11-03 사용자 결정). UI 변경은 요청한 화면·행동에 필요한 최소 범위로 제한한다. 프로토타입 화면 구성은 재사용 대상이다.
 
 ## 스택과 폴더
 - Next.js 16(App Router) + Vercel + Supabase(PostgreSQL·Storage). 2026-11-03 사용자 선택. Next.js 16은 이전 버전과 API·규칙이 다르다. 코드를 쓰기 전에 `node_modules/next/dist/docs/`의 해당 안내를 읽고 deprecation 안내를 따른다.
