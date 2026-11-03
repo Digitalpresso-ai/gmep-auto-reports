@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
 import { ApiError, api, errorText, fmtDate, kstToday } from "../api";
 import { useDialog } from "../dialog";
@@ -13,6 +13,7 @@ const AUTO_SELECT_MAX = 4;
 const sameRef = (a: PhotoRef, b: PhotoRef) => a.source === b.source && a.id === b.id;
 
 // H0 작성 화면 → E1/E2 입력 → G1 생성 중 / G2 실패 / Q1 한도 소진 → R1 미리보기·편집 / R2 저장 실패 → V1 AI 수정 → W1 Word
+// 휴대폰에서 한 화면에 한 가지 일만 하도록 입력 화면과 수정 대화 화면을 나누고, 보고서 본문은 문서 시트를 열어야 보인다.
 export function Workspace({ profile }: { profile: Profile }) {
   const [date, setDate] = useState(kstToday);
   const [day, setDay] = useState<DayView | null>(null);
@@ -28,6 +29,9 @@ export function Workspace({ profile }: { profile: Profile }) {
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [reviseText, setReviseText] = useState("");
   const [reviseStatus, setReviseStatus] = useState<Status>(null);
+  const [pendingRequest, setPendingRequest] = useState("");
+  const [stage, setStage] = useState<"input" | "chat">("input");
+  const [docOpen, setDocOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [status, setStatus] = useState<Status>(null);
   const [draftSaving, setDraftSaving] = useState<"" | "saving" | "saved" | "error">("");
@@ -129,6 +133,7 @@ export function Workspace({ profile }: { profile: Profile }) {
         setSelected(sel);
         setUsage(v.usage);
         setReport(r);
+        setStage(r ? "chat" : "input");
         setLoadError("");
       },
       (e) => !cancelled && setLoadError(errorText(e)),
@@ -147,6 +152,7 @@ export function Workspace({ profile }: { profile: Profile }) {
     setReviseText("");
     setReviseStatus(null);
     setStatus(null);
+    setDocOpen(false);
     setReportSave({ text: "", err: false });
     setDraftSaving("");
     setDate(next);
@@ -173,7 +179,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       const heading = box.previousElementSibling;
       if (general && !selected.length) {
         const p = document.createElement("p");
-        p.textContent = "(왼쪽 4번에서 고른 사진이 여기에 들어갑니다)";
+        p.textContent = "(입력 화면에서 고른 사진이 여기에 들어갑니다)";
         box.append(p);
       }
       if (general && heading instanceof HTMLElement && heading.tagName === "H2") heading.hidden = selected.length > 0 && !assigned[i].length;
@@ -294,7 +300,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       setReviseStatus(null);
       setDay((d) => (d ? { ...d, report: { title: r.report.title, updatedAt: r.report.updatedAt } } : d));
       setReportSave({ text: "저장됨", err: false });
-      setStatus({ kind: "ok", text: "보고서를 만들어 저장했습니다. 문장을 눌러 고친 뒤 Word로 받으세요." });
+      setStage("chat");
     } catch (e) {
       if (e instanceof ApiError && e.code === "limit_reached") setUsage((u) => (u ? { ...u, generateRemaining: 0 } : u));
       setStatus({ kind: "err", text: errorText(e), retry: e instanceof ApiError && e.status !== 429 && e.code !== "report_exists" });
@@ -314,19 +320,21 @@ export function Workspace({ profile }: { profile: Profile }) {
     setRevising(true);
     setElapsed(0);
     setReviseStatus(null);
+    setPendingRequest(request);
+    setReviseText("");
     try {
       const r = await api<{ report: ReportDoc; usage: Usage; revisions: Revision[] }>(`/api/days/${date}/report/revisions`, { body: { request } });
       setUsage(r.usage);
       setReport(r.report);
       setRevisions(r.revisions);
-      setReviseText("");
       setDay((d) => (d ? { ...d, report: { title: r.report.title, updatedAt: r.report.updatedAt } } : d));
       setReportSave({ text: "저장됨", err: false });
-      setReviseStatus({ kind: "ok", text: "수정 요청을 반영해 저장했습니다." });
     } catch (e) {
       if (e instanceof ApiError && e.code === "limit_reached") setUsage((u) => (u ? { ...u, reviseRemaining: 0 } : u));
       setReviseStatus({ kind: "err", text: errorText(e) });
+      setReviseText((t) => t || request);
     } finally {
+      setPendingRequest("");
       setRevising(false);
     }
   }
@@ -351,38 +359,65 @@ export function Workspace({ profile }: { profile: Profile }) {
     a.remove();
   }
 
+  // 문서 시트가 열린 동안 뒤 화면이 같이 스크롤되지 않게 하고 Esc로 닫는다
+  useEffect(() => {
+    if (!docOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDocOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [docOpen]);
+
+  // 대화 화면에 새 메시지가 붙으면 맨 아래로 내린다
+  const chatEnd = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (stage === "chat") chatEnd.current?.scrollIntoView({ block: "end" });
+  }, [stage, revisions.length, pendingRequest]);
+
   const eduMaterials = day?.materials.filter((m) => m.kind === "education") ?? [];
   const schedMaterials = day?.materials.filter((m) => m.kind === "schedule") ?? [];
   const order = (ref: PhotoRef) => selected.findIndex((s) => sameRef(s, ref)) + 1;
   const busy = aiBusy || !day;
 
+  const docCard = report && (
+    <button type="button" className="doc-card" onClick={() => setDocOpen(true)} disabled={aiBusy}>
+      <span className="doc-icon" aria-hidden>
+        DOC
+      </span>
+      <span className="doc-text">
+        <b>{report.title || `${fmtDate(date)} 출장보고서`}</b>
+        <span>눌러서 문서 보기 · 직접 고칠 수 있습니다</span>
+      </span>
+    </button>
+  );
+
   return (
-    <div className="page">
-      <div className="work">
-        <section className="card steps" aria-busy={busy}>
-          <div className="step">
-            <h2>
-              <span className="num">1</span>보고 일자
-            </h2>
-            <input className="input" type="date" value={date} disabled={aiBusy} onChange={(e) => changeDate(e.target.value)} />
-            <div className="usage" style={{ marginTop: 10 }}>
-              {usage && (
-                <>
-                  오늘 남은 생성{" "}
-                  <b>
-                    {usage.generateRemaining}/{usage.generateLimit}회
-                  </b>
-                  {" · "}수정{" "}
-                  <b>
-                    {usage.reviseRemaining}/{usage.reviseLimit}회
-                  </b>
-                </>
-              )}
-              <span className="spacer" />
-              <span className="chip chip-muted">{profile.label}</span>
-              {!profile.proposalFilename && <span className="chip">기안문 없음</span>}
-            </div>
+    <div className="ws">
+      {stage === "input" ? (
+        <section className="ws-input" aria-busy={busy}>
+          <div className="ws-head">
+            <input className="input ws-date" type="date" value={date} disabled={aiBusy} aria-label="보고 일자" onChange={(e) => changeDate(e.target.value)} />
+            {usage && (
+              <span className="usage">
+                생성 <b>{usage.generateRemaining}/{usage.generateLimit}</b> · 수정 <b>{usage.reviseRemaining}/{usage.reviseLimit}</b>
+              </span>
+            )}
+            {!profile.proposalFilename && <span className="chip">기안문 없음</span>}
           </div>
+
+          {report && !aiBusy && (
+            <button type="button" className="resume" onClick={() => setStage("chat")}>
+              <span>
+                <b>이 날짜 보고서가 있습니다</b>
+                <span className="opt">수정 대화로 돌아가기</span>
+              </span>
+              <span aria-hidden>→</span>
+            </button>
+          )}
 
           {loadError && <div className="msg msg-err">{loadError}</div>}
           {!day && !loadError && (
@@ -393,19 +428,19 @@ export function Workspace({ profile }: { profile: Profile }) {
 
           {day && (
             <>
-              {!day.hasShared && (
-                <div className="msg msg-warn">이 날짜에는 운영사 공통 자료가 아직 없습니다. 일정을 직접 입력하고 사진을 추가하면 보고서를 만들 수 있습니다.</div>
-              )}
-              <div className="step">
-                <h2>
-                  <span className="num">2</span>운영사 제공 일정
-                  {day.hasShared && <span className="opt">· 공통 일정을 복사해 둔 것입니다. 고쳐도 다른 회사에는 영향이 없습니다</span>}
-                </h2>
+              {!day.hasShared && <div className="msg msg-warn">이 날짜에는 운영사 공통 자료가 아직 없습니다. 일정을 직접 입력하고 사진을 추가하면 보고서를 만들 수 있습니다.</div>}
+
+              <div className="block">
+                <div className="block-title">
+                  운영사 제공 일정
+                  {day.hasShared && <span className="opt">공통 일정 복사본 · 고쳐도 다른 회사에는 영향 없음</span>}
+                </div>
                 <textarea
                   className="textarea"
-                  rows={7}
+                  rows={5}
                   value={schedule}
                   disabled={generating}
+                  aria-label="운영사 제공 일정"
                   placeholder={"카톡·메일로 받은 그날 일정을 붙여 넣으세요.\n예) 09:30 betahaus 온보딩"}
                   onChange={(e) => {
                     setSchedule(e.target.value);
@@ -432,10 +467,10 @@ export function Workspace({ profile }: { profile: Profile }) {
                 )}
               </div>
 
-              <div className="step">
-                <h2>
-                  <span className="num">3</span>교육자료 <span className="opt">· 운영사 공통 자료</span>
-                </h2>
+              <details className="block fold">
+                <summary className="block-title">
+                  교육자료 <span className="opt">{eduMaterials.length ? `${eduMaterials.length}개 · 운영사 공통 자료` : "없음 · 일정만으로 간략히 작성"}</span>
+                </summary>
                 {eduMaterials.length ? (
                   <ul className="files">
                     {eduMaterials.map((m) => (
@@ -452,24 +487,24 @@ export function Workspace({ profile }: { profile: Profile }) {
                     ))}
                   </ul>
                 ) : (
-                  <p className="hint">이 날짜에 등록된 교육자료가 없습니다. 일정만으로 간략히 작성합니다.</p>
+                  <p className="hint">이 날짜에 등록된 교육자료가 없습니다.</p>
                 )}
-              </div>
+              </details>
 
-              <div className="step">
-                <h2>
-                  <span className="num">4</span>참여 사진
-                </h2>
-                <label className="drop">
-                  {uploading || "사진 추가 (여러 장 선택 가능)"}
-                  <input type="file" accept="image/*" multiple disabled={generating || Boolean(uploading)} onChange={(e) => (addPhotos(e.target.files), (e.target.value = ""))} />
-                </label>
-                {day.photos.length > 0 && (
+              <div className="block">
+                <div className="block-title">
+                  참여 사진 <span className="opt">{day.photos.length ? `${selected.length}장 선택 / ${day.photos.length}장` : "없음"}</span>
+                  <span className="spacer" />
+                  <label className={`btn btn-small add-photo${generating || uploading ? " is-disabled" : ""}`}>
+                    {uploading ? <span className="spin" /> : "＋"} 추가
+                    <input type="file" accept="image/*" multiple disabled={generating || Boolean(uploading)} onChange={(e) => (addPhotos(e.target.files), (e.target.value = ""))} />
+                  </label>
+                </div>
+                {uploading && <p className="hint">{uploading}</p>}
+                {day.photos.length > 0 ? (
                   <>
                     <div className="pbar">
-                      <span>
-                        보고서에 넣을 사진 {selected.length}장 / 전체 {day.photos.length}장
-                      </span>
+                      <span>{selected.length === 0 ? "넣을 사진을 누르세요. 고른 순서대로 번호가 붙습니다." : "고른 순서대로 보고서에 들어갑니다."}</span>
                       <span className="row">
                         <button type="button" className="btn-link" onClick={() => selectAll(true)}>
                           모두 선택
@@ -479,8 +514,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                         </button>
                       </span>
                     </div>
-                    {selected.length === 0 && <div className="msg msg-info">보고서에 넣을 사진을 눌러서 고르세요. 고른 순서대로 번호가 붙습니다.</div>}
-                    <div className="thumbs">
+                    <div className="thumbs thumbs-scroll">
                       {day.photos.map((p) => {
                         const no = order(p);
                         return (
@@ -501,19 +535,22 @@ export function Workspace({ profile }: { profile: Profile }) {
                       })}
                     </div>
                   </>
+                ) : (
+                  <p className="hint">이 날짜에 등록된 사진이 없습니다. ‘추가’로 직접 올릴 수 있습니다.</p>
                 )}
               </div>
 
-              <div className="step">
-                <h2>
-                  <span className="num">5</span>특이사항 <span className="opt">· 별도 성과, 별도 미팅 등</span>
-                </h2>
+              <div className="block">
+                <div className="block-title">
+                  특이사항 <span className="opt">별도 성과, 별도 미팅 등</span>
+                </div>
                 <textarea
                   className="textarea"
-                  rows={4}
+                  rows={3}
                   maxLength={5000}
                   value={notes}
                   disabled={generating}
+                  aria-label="특이사항"
                   placeholder={"예) 점심 네트워킹에서 ○○사 CTO와 PoC 논의, 11/10 후속 미팅 확정"}
                   onChange={(e) => {
                     setNotes(e.target.value);
@@ -525,11 +562,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                 </div>
               </div>
 
-              <button type="button" className="btn btn-primary btn-block" disabled={aiBusy || limitReached} onClick={startGenerate}>
-                {generating ? <span className="spin" /> : null}
-                {generating ? "보고서 작성 중…" : report ? "다시 만들기" : "보고서 만들기"}
-              </button>
-              {limitReached && <div className="msg msg-warn">오늘 사용 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다.</div>}
+              {limitReached && <div className="msg msg-warn">오늘 생성 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다.</div>}
               {status && (
                 <div className={`msg msg-${status.kind}`}>
                   {status.text}
@@ -543,104 +576,134 @@ export function Workspace({ profile }: { profile: Profile }) {
                   )}
                 </div>
               )}
+
+              <div className="ws-action">
+                {generating && (
+                  <div className="gen-progress">
+                    <div className="bar">
+                      <i style={{ width: `${Math.min(95, (elapsed / 150) * 100)}%` }} />
+                    </div>
+                    교육자료 분량에 따라 1~3분 걸립니다 · {elapsed}초 · 화면을 닫지 마세요
+                  </div>
+                )}
+                <button type="button" className="btn btn-primary btn-block" disabled={aiBusy || limitReached} onClick={startGenerate}>
+                  {generating ? <span className="spin" /> : null}
+                  {generating ? "보고서 작성 중…" : report ? "다시 만들기" : "보고서 만들기"}
+                </button>
+              </div>
             </>
           )}
         </section>
-
-        <section>
-          <div className="toolbar">
-            <button type="button" className="btn btn-primary" disabled={!report || aiBusy} onClick={downloadWord}>
-              Word(.docx) 다운로드
+      ) : (
+        <section className="ws-chat">
+          <div className="chat-head">
+            <button type="button" className="btn btn-small" disabled={aiBusy} onClick={() => setStage("input")}>
+              ← 입력
             </button>
+            <b className="chat-date">{fmtDate(date)}</b>
             <span className="spacer" />
-            {report && (
-              <span className={`savestate${reportSave.err ? " err" : ""}`}>
-                {reportSave.text}
-                {reportSave.err && (
-                  <>
-                    {" "}
-                    <button type="button" className="btn-link" onClick={flushReport}>
-                      다시 저장
-                    </button>
-                  </>
-                )}
-              </span>
-            )}
+            <button type="button" className="btn btn-small" disabled={!report || aiBusy} onClick={downloadWord}>
+              Word
+            </button>
           </div>
-          {report && !aiBusy && <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>미리보기의 문장을 눌러 직접 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다.</p>}
-          {report && !generating && (
-            <div className="revise">
-              <h2>AI로 고치기</h2>
-              {revisions.length > 0 && (
-                <ol className="revise-log" aria-label="지난 수정 요청">
-                  {revisions.map((r, i) => (
-                    <li key={i}>{r.request}</li>
-                  ))}
-                </ol>
-              )}
-              <div className="revise-row">
-                <textarea
-                  className="textarea"
-                  rows={2}
-                  maxLength={1000}
-                  value={reviseText}
-                  disabled={revising || reviseLimitReached}
-                  placeholder="예) 시사점을 더 구체적으로, 성과에 ○○ 추가"
-                  aria-label="수정 요청"
-                  onChange={(e) => setReviseText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      revise();
-                    }
-                  }}
-                />
-                <button type="button" className="btn btn-primary" disabled={revising || reviseLimitReached || !reviseText.trim()} onClick={revise}>
-                  {revising ? <span className="spin" /> : null}
-                  {revising ? "고치는 중…" : "AI로 고치기"}
-                </button>
-              </div>
-              <div className="hint">
-                {reviseLimitReached
-                  ? "오늘 수정 요청 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다."
-                  : `요청한 부분만 고치고 직접 고친 문장은 그대로 둡니다. 지난 요청을 기억합니다 · 오늘 남은 수정 ${usage?.reviseRemaining ?? 0}/${usage?.reviseLimit ?? 0}회`}
-              </div>
-              {reviseStatus && <div className={`msg msg-${reviseStatus.kind}`}>{reviseStatus.text}</div>}
+
+          <ol className="chat" aria-label="보고서 수정 대화">
+            <li className="bubble ai">
+              보고서를 만들었습니다. 문서를 열어 확인하고, 고칠 부분은 아래에 적어 보내세요.
+              {revisions.length === 0 && docCard}
+            </li>
+            {revisions.map((r, i) => (
+              <Fragment key={i}>
+                <li className="bubble me">{r.request}</li>
+                <li className="bubble ai">
+                  수정 요청을 반영했습니다.
+                  {i === revisions.length - 1 && !pendingRequest && docCard}
+                </li>
+              </Fragment>
+            ))}
+            {pendingRequest && (
+              <>
+                <li className="bubble me">{pendingRequest}</li>
+                <li className="bubble ai">
+                  <span className="spin" /> 수정 요청을 반영하고 있습니다 · {elapsed}초
+                </li>
+              </>
+            )}
+            <li ref={chatEnd} aria-hidden className="chat-end" />
+          </ol>
+
+          <div className="composer">
+            {reviseStatus && <div className={`msg msg-${reviseStatus.kind}`}>{reviseStatus.text}</div>}
+            <div className="composer-row">
+              <textarea
+                className="textarea"
+                rows={1}
+                maxLength={1000}
+                value={reviseText}
+                disabled={aiBusy || reviseLimitReached}
+                placeholder="예) 시사점을 더 구체적으로"
+                aria-label="수정 요청"
+                onChange={(e) => setReviseText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    revise();
+                  }
+                }}
+              />
+              <button type="button" className="btn btn-primary send" aria-label="수정 요청 보내기" disabled={aiBusy || reviseLimitReached || !reviseText.trim()} onClick={revise}>
+                {revising ? <span className="spin" /> : "↑"}
+              </button>
             </div>
-          )}
-          <div className="paper">
-            {aiBusy && (
-              <div className="progress">
-                <b style={{ color: "var(--text-strong)" }}>{revising ? "수정 요청을 반영하고 있습니다" : "보고서를 작성하고 있습니다"}</b>
-                <div className="bar">
-                  <i style={{ width: `${Math.min(95, (elapsed / 150) * 100)}%` }} />
-                </div>
-                교육자료 분량에 따라 1~3분 걸립니다 · {elapsed}초 경과
-                <br />
-                화면을 닫지 말고 기다려 주세요.
-              </div>
-            )}
-            {!report && !aiBusy && (
-              <div className="empty">
-                <b>왼쪽 내용을 채우고 &lsquo;보고서 만들기&rsquo;를 누르세요</b>
-                기안문과 일정만 있어도 만들 수 있고, 교육자료가 있으면 세부 교육 내용이 풍부해집니다.
-              </div>
-            )}
-            <div
-              id="report"
-              ref={reportEl}
-              hidden={!report || aiBusy}
-              contentEditable={Boolean(report) && !aiBusy}
-              suppressContentEditableWarning
-              onInput={() => {
-                reportDirty.current = true;
-                setReportSave({ text: "저장 대기…", err: false });
-                clearTimeout(reportTimer.current);
-                reportTimer.current = setTimeout(flushReport, 1500);
-              }}
-            />
+            <div className="hint">
+              {reviseLimitReached ? "오늘 수정 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다." : `요청한 부분만 고치고 직접 고친 문장은 그대로 둡니다 · 남은 수정 ${usage?.reviseRemaining ?? 0}/${usage?.reviseLimit ?? 0}회`}
+            </div>
           </div>
         </section>
+      )}
+
+      {/* 직접 고친 내용과 사진 배치를 유지하려고 본문은 닫혀 있어도 그대로 두고 숨기기만 한다 */}
+      <div className="sheet-veil" hidden={!docOpen} onClick={(e) => e.target === e.currentTarget && setDocOpen(false)}>
+        <div className="sheet" role="dialog" aria-modal="true" aria-label="보고서 문서">
+          <div className="sheet-head">
+            <button type="button" className="btn btn-small" onClick={() => setDocOpen(false)}>
+              닫기
+            </button>
+            <span className={`savestate${reportSave.err ? " err" : ""}`}>
+              {reportSave.text}
+              {reportSave.err && (
+                <>
+                  {" "}
+                  <button type="button" className="btn-link" onClick={flushReport}>
+                    다시 저장
+                  </button>
+                </>
+              )}
+            </span>
+            <span className="spacer" />
+            <button type="button" className="btn btn-small btn-primary" disabled={!report || aiBusy} onClick={downloadWord}>
+              Word 다운로드
+            </button>
+          </div>
+          <div className="sheet-body">
+            <p className="hint sheet-hint">문장을 눌러 직접 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다.</p>
+            <div className="paper">
+              <div
+                id="report"
+                ref={reportEl}
+                hidden={!report}
+                contentEditable={Boolean(report) && !aiBusy}
+                suppressContentEditableWarning
+                onInput={() => {
+                  reportDirty.current = true;
+                  setReportSave({ text: "저장 대기…", err: false });
+                  clearTimeout(reportTimer.current);
+                  reportTimer.current = setTimeout(flushReport, 1500);
+                }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {confirmOverwrite && (
