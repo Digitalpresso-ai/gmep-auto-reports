@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
 import { ApiError, api, errorText, fmtDate, kstToday } from "../api";
 import { imageForm, toJpeg } from "../files";
 import type { DayView, PhotoRef, Profile, ReportDoc, Usage } from "./types";
@@ -127,24 +128,31 @@ export function Workspace({ profile }: { profile: Profile }) {
   }
 
   // ---------- 미리보기에 보고서·사진 넣기 ----------
-  const photoUrl = useCallback((ref: PhotoRef) => day?.photos.find((p) => sameRef(p, ref))?.url ?? "", [day]);
+  const photoUrl = useCallback((key: string) => day?.photos.find((p) => photoKey(p) === key)?.url ?? "", [day]);
 
+  // AI가 섹션 옆에 둔 사진은 그 자리에, 나머지는 참여 사진 자리에 넣는다(PHOTO-2). 참여 사진 자리가 비면 그 제목을 숨긴다.
   const fillPhotos = useCallback(() => {
-    const box = reportEl.current?.querySelector<HTMLElement>(".photos");
-    if (!box) return;
-    box.contentEditable = "false";
-    box.innerHTML = "";
-    if (!selected.length) {
-      const p = document.createElement("p");
-      p.textContent = "(왼쪽 4번에서 고른 사진이 여기에 들어갑니다)";
-      box.append(p);
-    }
-    for (const ref of selected) {
-      const img = document.createElement("img");
-      img.src = photoUrl(ref);
-      img.alt = "";
-      box.append(img);
-    }
+    const boxes = [...(reportEl.current?.querySelectorAll<HTMLElement>(".photos") ?? [])];
+    if (!boxes.length) return;
+    const assigned = assignPhotos(boxes.map((b) => parsePhotoKeys(b.dataset.photos)), selected.map(photoKey));
+    boxes.forEach((box, i) => {
+      box.contentEditable = "false";
+      box.innerHTML = "";
+      for (const key of assigned[i]) {
+        const img = document.createElement("img");
+        img.src = photoUrl(key);
+        img.alt = "";
+        box.append(img);
+      }
+      const general = box.dataset.photos === undefined;
+      const heading = box.previousElementSibling;
+      if (general && !selected.length) {
+        const p = document.createElement("p");
+        p.textContent = "(왼쪽 4번에서 고른 사진이 여기에 들어갑니다)";
+        box.append(p);
+      }
+      if (general && heading instanceof HTMLElement && heading.tagName === "H2") heading.hidden = selected.length > 0 && !assigned[i].length;
+    });
   }, [selected, photoUrl]);
 
   useEffect(() => {

@@ -1,4 +1,5 @@
-// 프로토타입 normalize()·renderReport()를 서버로 옮겼다. 참여 사진은 HTML에 넣지 않고 자리만 둔다(사진은 초안의 선택을 따른다).
+// 프로토타입 normalize()·renderReport()를 서버로 옮겼다. 사진은 HTML에 넣지 않고 자리만 둔다(사진은 초안의 선택을 따른다).
+// AI가 섹션 옆에 둔 사진은 그 섹션 뒤 자리에 사진 키(data-photos)로 적고, 나머지는 키 없는 참여 사진 자리에 들어간다(src/lib/photo-layout.ts).
 
 export type Item = { t: string; sub: string[] };
 export type Report = {
@@ -11,6 +12,7 @@ export type Report = {
   insights: Item[];
   plans: string[];
   attachments: string[];
+  photos: { no: number; place: string }[];
 };
 
 const arr = (x: unknown): unknown[] => (Array.isArray(x) ? x : []);
@@ -48,6 +50,10 @@ export function normalizeReport(r: Record<string, unknown>): Report {
     insights: arr(r.insights).map(item),
     plans: strs(r.plans),
     attachments: strs(r.attachments),
+    photos: arr(r.photos).flatMap((x) => {
+      const o = (x ?? {}) as { no?: unknown; place?: unknown };
+      return Number.isInteger(o.no) && typeof o.place === "string" ? [{ no: o.no as number, place: o.place }] : [];
+    }),
   };
 }
 
@@ -79,17 +85,26 @@ function table(head: string[] | null, rows: string[][], cls?: string): string {
 
 const asItems = (xs: string[]): Item[] => xs.map((t) => ({ t, sub: [] }));
 
-export function renderReportHtml(r: Report): string {
+/** photoKeys[i]는 프롬프트의 [사진 i+1]에 해당하는 사진 키("shared:<id>"). 없는 번호·자리는 참여 사진으로 보낸다. */
+export function renderReportHtml(r: Report, photoKeys: string[] = []): string {
+  const placed = new Map<string, string[]>();
+  for (const p of r.photos) {
+    const key = photoKeys[p.no - 1];
+    if (!key) continue;
+    const list = placed.get(p.place) ?? [];
+    if (!list.includes(key)) placed.set(p.place, [...list, key]);
+  }
+  const box = (place: string) => (placed.get(place)?.length ? `<div class="photos" data-photos="${esc(placed.get(place)!.join(" "))}"></div>` : "");
   let n = 0;
   let h = `<h1>${esc(r.title)}</h1>`;
   h += `<h2>${++n}. 기본 정보</h2>` + table(null, r.basic.map((x) => [x[0] ?? "", x[1] ?? ""]), "kv");
-  if (r.schedule.length) h += `<h2>${++n}. 일정 및 수행 내용</h2>` + table(["시간", "프로그램", "수행 내용"], r.schedule.map((x) => [x[0] ?? "", x[1] ?? "", x[2] ?? ""]));
+  if (r.schedule.length) h += `<h2>${++n}. 일정 및 수행 내용</h2>` + table(["시간", "프로그램", "수행 내용"], r.schedule.map((x) => [x[0] ?? "", x[1] ?? "", x[2] ?? ""])) + box("schedule");
   if (r.education.length) {
     h += `<h2>${++n}. 세부 교육 내용</h2>`;
-    for (const s of r.education) {
+    for (const [i, s] of r.education.entries()) {
       if (s.title) h += `<h3>${esc(s.title)}</h3>`;
       if (s.table) h += table(s.table.head, s.table.rows);
-      h += ul(s.items, true);
+      h += ul(s.items, true) + box(`edu:${i + 1}`);
     }
   }
   if (r.achievements.length) h += `<h2>${++n}. 주요 성과</h2>` + ul(r.achievements, true);
@@ -99,7 +114,30 @@ export function renderReportHtml(r: Report): string {
     if (r.insights.length) h += "<h3>시사점</h3>" + ul(r.insights, true);
     if (r.plans.length) h += "<h3>향후 계획</h3>" + ul(asItems(r.plans), false);
   }
+  // 모든 사진이 본문에 배치되면 미리보기·Word가 이 제목을 숨기므로 번호 항목의 맨 끝에 둔다. 붙임은 번호 없이 그 뒤에 둔다.
   h += `<h2>${++n}. 참여 사진</h2><div class="photos"></div>`;
-  if (r.attachments.length) h += `<h2>${++n}. 첨부</h2>` + ul(asItems(r.attachments), false);
+  if (r.attachments.length) h += `<h2>붙임</h2>` + ul(asItems(r.attachments), false);
   return h;
 }
+
+const str = { type: "string" } as const;
+const strList = { type: "array", items: str } as const;
+const obj = (properties: Record<string, unknown>) => ({ type: "object", additionalProperties: false, required: Object.keys(properties), properties });
+const itemList = { type: "array", items: obj({ t: str, sub: strList }) } as const;
+
+/** Messages API 구조화 출력(output_config.format)용 스키마. 프롬프트의 SCHEMA 예시와 같은 키를 쓴다(AI-5). */
+export const REPORT_JSON_SCHEMA = obj({
+  title: str,
+  basic: { type: "array", items: strList },
+  schedule: { type: "array", items: strList },
+  education: {
+    type: "array",
+    items: obj({ title: str, items: itemList, table: { anyOf: [{ type: "null" }, obj({ head: strList, rows: { type: "array", items: strList } })] } }),
+  },
+  achievements: itemList,
+  special: itemList,
+  insights: itemList,
+  plans: strList,
+  attachments: strList,
+  photos: { type: "array", items: obj({ no: { type: "integer" }, place: str }) },
+});

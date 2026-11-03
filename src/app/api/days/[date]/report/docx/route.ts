@@ -5,6 +5,7 @@ import { isIsoDate } from "@/server/domain/dates";
 import { buildDocx } from "@/server/docx";
 import { badRequest, notFound } from "@/server/http";
 import { getObject } from "@/server/storage";
+import { photoKey } from "@/lib/photo-layout";
 import { getDraft, resolvePhotos } from "@/server/workspace";
 
 export const maxDuration = 60;
@@ -20,7 +21,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/days/[date]/repo
   const refs = (await getDraft(s.companyId, date))?.selected_photos ?? [];
   const resolved = (await resolvePhotos(s.companyId, date, refs)) ?? [];
   const photos = await Promise.all(
-    resolved.map(async (p) => ({ bytes: await getObject(p.storagePath), width: p.width, height: p.height, type: p.storagePath.endsWith(".png") ? ("png" as const) : ("jpg" as const) })),
+    resolved.map(async (p) => ({ key: photoKey(p), bytes: await getObject(p.storagePath), width: p.width, height: p.height, type: p.storagePath.endsWith(".png") ? ("png" as const) : ("jpg" as const) })),
   );
   const buf = await buildDocx([{ html: r.body_html, photos }]);
   const company = (await getCompanyProfile(s.companyId)).label.replace(/[\\/:*?"<>|]/g, "");

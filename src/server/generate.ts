@@ -2,7 +2,8 @@ import "server-only";
 import { callModel, type ModelRequest } from "./ai";
 import { db } from "./db";
 import { buildPrompt, type Material } from "./domain/prompt";
-import { normalizeReport, parseModelJson, renderReportHtml } from "./domain/report";
+import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml } from "./domain/report";
+import { photoKey } from "@/lib/photo-layout";
 import { canGenerate, usageView, type UsageView } from "./domain/usage";
 import { aiModel } from "./settings";
 import { getObject } from "./storage";
@@ -26,7 +27,18 @@ async function reserve(companyId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function promptRequest(companyId: string, date: string): Promise<ModelRequest> {
+// 회사가 고른 순서대로 사진 키와 설명을 돌려준다. 설명은 공통 사진에만 있다(PHOTO-1).
+async function selectedPhotos(date: string, refs: { source: string; id: string }[]): Promise<{ key: string; description: string }[]> {
+  const sharedIds = refs.filter((r) => r.source === "shared").map((r) => r.id);
+  const rows = sharedIds.length
+    ? await db()<{ id: string; description: string | null }[]>`
+        select id, description from shared_files where report_date = ${date} and kind = 'photo' and id = any(${sharedIds}::uuid[])`
+    : [];
+  const desc = new Map(rows.map((r) => [r.id, r.description ?? ""]));
+  return refs.map((r) => ({ key: photoKey(r), description: r.source === "shared" ? (desc.get(r.id) ?? "") : "" }));
+}
+
+async function promptRequest(companyId: string, date: string): Promise<ModelRequest & { photoKeys: string[] }> {
   const sql = db();
   const [c] = await sql<{ name: string; traveler: string; business_intro: string; proposal_text: string }[]>`
     select name, traveler, business_intro, proposal_text from companies where id = ${companyId}`;
@@ -36,6 +48,7 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
   const images = await sql<{ storage_path: string }[]>`
     select storage_path from shared_files where report_date = ${date} and kind = 'schedule_image' order by created_at, id limit ${MAX_SCHEDULE_IMAGES}`;
   const draft = await getDraft(companyId, date);
+  const photos = await selectedPhotos(date, draft?.selected_photos ?? []);
   const pick = (kind: string): Material[] => materials.filter((m) => m.kind === kind).map((m) => ({ filename: m.filename, text: m.text_content }));
   const prompt = buildPrompt({
     companyName: c.name,
@@ -48,12 +61,15 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
     educationMaterials: pick("education"),
     notes: draft?.notes ?? "",
     hasScheduleImages: images.length > 0,
+    photos,
   });
   // 참여 사진은 보내지 않는다(AI-6). 일정 이미지만 보낸다(FUNC-4).
   const bytes = await Promise.all(images.map((i) => getObject(i.storage_path)));
   return {
     model: await aiModel(),
     prompt,
+    jsonSchema: REPORT_JSON_SCHEMA,
+    photoKeys: photos.map((p) => p.key),
     images: bytes.map((b, idx) => ({ mediaType: mediaTypeOf(images[idx].storage_path), base64: Buffer.from(b).toString("base64") })),
   };
 }
@@ -86,7 +102,7 @@ export async function generateReport(companyId: string, date: string, overwrite:
       await recordUsage({ companyId, kind: "generate", model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, success: parsed !== null });
       if (!parsed) continue;
       const report = normalizeReport(parsed);
-      const bodyHtml = renderReportHtml(report);
+      const bodyHtml = renderReportHtml(report, req.photoKeys);
       const draft = await getDraft(companyId, date);
       const [row] = await sql<{ updated_at: Date }[]>`
         insert into reports (company_id, report_date, title, body_html, schedule_text, notes)

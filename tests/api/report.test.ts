@@ -174,3 +174,27 @@ describe("AUTH-8 다른 회사 보고서", () => {
     expect((await (await getReport(a.cookie)).json()).title).toBe("고친 제목");
   });
 });
+
+describe("PHOTO-2 사진 배치", () => {
+  it("고른 사진의 설명을 선택 순서대로 프롬프트에 넣고, AI가 고른 섹션 옆에 사진 자리를 만든다", async () => {
+    const d = "2026-11-05";
+    const cId = await companyWithPassword(t.sql, "주식회사 긱토", "c-password");
+    const c = { cookie: await loginCookie(cId, "c-password") };
+    await t.sql`insert into shared_days (report_date) values (${d})`;
+    const [p1] = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height, description)
+      values (${d}, 'photo', 'shared/2026-11-05/p1.jpg', 'p1.jpg', 1100, 825, '[강연] 발표 장면') returning id`;
+    const [p2] = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height)
+      values (${d}, 'photo', 'shared/2026-11-05/p2.jpg', 'p2.jpg', 1100, 825) returning id`;
+    const selectedPhotos = [{ source: "shared", id: p2.id }, { source: "shared", id: p1.id }];
+    await (await import("@/app/api/days/[date]/draft/route")).PUT(request("PUT", "/x", { cookie: c.cookie, body: { selectedPhotos } }), params({ date: d }));
+    callModel.mockResolvedValueOnce(
+      reply(JSON.stringify({ title: "t", education: [{ title: "3-1. 강연", items: [{ t: "시장", sub: [] }], table: null }], photos: [{ no: 2, place: "edu:1" }, { no: 1, place: "photos" }] })),
+    );
+    const body = await (await generate(c.cookie, {}, d)).json();
+    const req = callModel.mock.calls[0][0];
+    expect(req.prompt).toContain("[사진 1] (설명 없음)\n[사진 2] [강연] 발표 장면");
+    expect(req.images).toHaveLength(0);
+    expect(req.jsonSchema).toBeDefined();
+    expect(body.report.bodyHtml).toContain(`<ul><li>시장</li></ul><div class="photos" data-photos="shared:${p1.id}"></div>`);
+  });
+});

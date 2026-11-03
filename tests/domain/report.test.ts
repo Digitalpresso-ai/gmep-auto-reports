@@ -13,6 +13,7 @@ const base: PromptInput = {
   educationMaterials: [],
   notes: "",
   hasScheduleImages: false,
+  photos: [],
 };
 
 describe("AI-4·FUNC-14 프롬프트", () => {
@@ -55,6 +56,18 @@ describe("AI-4·FUNC-14 프롬프트", () => {
   });
 });
 
+describe("PHOTO-2 사진 설명 전달", () => {
+  it("선택 순서대로 사진 번호와 관리자가 만든 설명을 넣고, 설명이 없는 사진은 그렇게 적는다", () => {
+    const p = buildPrompt({ ...base, photos: [{ description: "강연 슬라이드 'Doing Business in Germany' 앞 발표자" }, { description: "" }] });
+    expect(p).toContain("[사진 1] 강연 슬라이드 'Doing Business in Germany' 앞 발표자\n[사진 2] (설명 없음)");
+    expect(p).toContain('"photos"');
+  });
+
+  it("사진이 없으면 사진 목록을 (없음)으로 둔다", () => {
+    expect(buildPrompt(base)).toContain("[참여 사진 — 번호·설명]\n(없음)");
+  });
+});
+
 describe("AI-5 모델 응답 해석", () => {
   it("JSON 하나 또는 코드블록에 싸인 JSON을 읽는다", () => {
     expect(parseModelJson('{"title":"t"}')).toEqual({ title: "t" });
@@ -87,7 +100,23 @@ describe("FUNC-8 보고서 HTML", () => {
     expect(html).toContain("<h2>3. 주요 성과</h2><ul><li><strong>거점 확보</strong><ul><li>사무실 이용</li></ul></li></ul>");
     expect(html).toContain("<h2>4. 시사점 및 향후 계획</h2><h3>향후 계획</h3><ul><li>후속 미팅 준비</li></ul>");
     expect(html).toContain('<h2>5. 참여 사진</h2><div class="photos"></div>');
-    expect(html).not.toContain("첨부");
+    expect(html).not.toContain("붙임");
+  });
+
+  it("AI가 고른 자리 옆에 사진 자리를 두고, 참여 사진은 마지막 번호 항목·붙임은 번호 없이 맨 끝에 둔다", () => {
+    const html = renderReportHtml(
+      normalizeReport({
+        title: "t",
+        schedule: [["09:30", "온보딩", "참석"]],
+        education: [{ title: "3-1. 강연", items: [{ t: "시장", sub: [] }] }, { title: "3-2. 워크숍", items: [{ t: "피치", sub: [] }] }],
+        attachments: ["강연 자료"],
+        photos: [{ no: 1, place: "edu:2" }, { no: 2, place: "schedule" }, { no: 3, place: "edu:2" }, { no: 4, place: "edu:9" }, { no: 9, place: "schedule" }],
+      }),
+      ["shared:a", "shared:b", "company:c", "shared:d"],
+    );
+    expect(html).toContain('</table><div class="photos" data-photos="shared:b"></div><h2>3. 세부 교육 내용</h2>');
+    expect(html).toContain('<h3>3-2. 워크숍</h3><ul><li>피치</li></ul><div class="photos" data-photos="shared:a company:c"></div>');
+    expect(html).toMatch(/<h2>4\. 참여 사진<\/h2><div class="photos"><\/div><h2>붙임<\/h2><ul><li>강연 자료<\/li><\/ul>$/);
   });
 
   it("모델이 낸 글자의 HTML을 이스케이프한다", () => {
