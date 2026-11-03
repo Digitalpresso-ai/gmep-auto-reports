@@ -1,0 +1,99 @@
+{
+  "id": "order-dedup-v3",
+  "title": "주문 ID 중복 저장 방지",
+  "intent": "동일한 주문 ID는 한 번만 저장하고 처음 저장한 주문 내용을 유지한다. 잘못된 ID가 있는 묶음은 일부도 저장하지 않는다.",
+  "context": "외부 서비스가 없는 합성 연습 기능. Python 표준 라이브러리와 로컬 SQLite로 순차 요청을 검증한다. 실제 시험 문제가 아니다.",
+  "context_files": [],
+  "sources": [
+    "examples/orders/orders.py"
+  ],
+  "requirements": [
+    {
+      "id": "R1",
+      "text": "같은 ID는 최초 입력을 유지하며 원본 목록은 변경하지 않는다.",
+      "checks": [
+        "orders-unit"
+      ]
+    },
+    {
+      "id": "R2",
+      "text": "누락·빈 ID를 거부하고 빈 입력은 허용한다.",
+      "checks": [
+        "orders-unit"
+      ]
+    },
+    {
+      "id": "R3",
+      "text": "SQLite를 다시 열어도 중복 없는 최초 내용이 남는다.",
+      "checks": [
+        "orders-integration"
+      ]
+    },
+    {
+      "id": "R4",
+      "text": "잘못된 ID를 포함한 묶음은 부분 저장하지 않는다.",
+      "checks": [
+        "orders-integration"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "orders-unit",
+      "kind": "unit",
+      "module": "orders",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "examples/orders/tests/unit",
+        "-v"
+      ],
+      "files": [
+        "examples/orders/tests/unit"
+      ],
+      "red_pattern": "FAIL: test_",
+      "green_pattern": "Ran [1-9][0-9]* tests?[\\s\\S]*\\bOK\\b",
+      "timeout": 10
+    },
+    {
+      "id": "orders-integration",
+      "kind": "integration",
+      "module": "orders",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "examples/orders/tests/integration",
+        "-v"
+      ],
+      "files": [
+        "examples/orders/tests/integration"
+      ],
+      "red_pattern": "FAIL: test_",
+      "green_pattern": "Ran [1-9][0-9]* tests?[\\s\\S]*\\bOK\\b",
+      "timeout": 10
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "주문 중복 제거와 저장 구현",
+      "path": "examples/orders/orders.py"
+    },
+    {
+      "label": "Unit test",
+      "path": "examples/orders/tests/unit/test_orders.py"
+    },
+    {
+      "label": "Integration test",
+      "path": "examples/orders/tests/integration/test_store.py"
+    }
+  ],
+  "limitations": [
+    "순차 요청만 검증. 동시 요청·대용량·외부 서비스 연동은 검증 범위 밖이다."
+  ]
+}

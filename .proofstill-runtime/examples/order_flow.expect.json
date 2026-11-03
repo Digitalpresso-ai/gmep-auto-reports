@@ -1,0 +1,26 @@
+{
+  "name": "미처리 주문 순차 처리",
+  "operations": ["orders.lookup", "context.merge", "orders.process", "orders.lookup", "context.merge", "orders.process", "orders.lookup"],
+  "status": "completed",
+  "assertions": [
+    {"step": 0, "field": "output", "path": "/items/0/id", "equals": 1},
+    {"step": 1, "field": "inputs", "path": "/policy/multiplier", "equals": 2},
+    {"step": 2, "field": "output", "path": "/processed/amount", "equals": 20},
+    {"step": 3, "field": "inputs", "path": "/after", "equals": 1},
+    {"step": 3, "field": "output", "path": "/items/0/id", "equals": 2},
+    {"step": 5, "field": "output", "path": "/processed/amount", "equals": 40},
+    {"step": 6, "field": "inputs", "path": "/after", "equals": 2},
+    {"step": 6, "field": "output", "path": "/items", "equals": []},
+    {"step": 2, "field": "ui", "path": "/screen", "equals": "orders"},
+    {"step": 2, "field": "ui", "path": "/element", "equals": "#process"}
+  ],
+  "links": [
+    {"from": 0, "to": 1, "output": "/items/0", "input": "/item"},
+    {"from": "context", "to": 1, "output": "", "input": "/policy"},
+    {"from": 1, "to": 2, "output": "", "input": "/payload"},
+    {"from": 2, "to": 3, "output": "/last_id", "input": "/after"},
+    {"from": 3, "to": 4, "output": "/items/0", "input": "/item"},
+    {"from": 4, "to": 5, "output": "", "input": "/payload"},
+    {"from": 5, "to": 6, "output": "/last_id", "input": "/after"}
+  ]
+}

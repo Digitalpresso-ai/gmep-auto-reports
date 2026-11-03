@@ -1,0 +1,210 @@
+{
+  "name": "목록 주문 상태 변경",
+  "operations": [
+    "orders.search",
+    "orders.visible",
+    "orders.status",
+    "orders.search",
+    "orders.visible",
+    "orders.status",
+    "orders.leave"
+  ],
+  "state": {
+    "screens": {
+      "home": {
+        "feature": "home",
+        "required": []
+      },
+      "orders.list": {
+        "feature": "orders",
+        "required": [
+          "query",
+          "page",
+          "items"
+        ],
+        "optional": [
+          "error"
+        ]
+      }
+    },
+    "transitions": [
+      {
+        "step": 0,
+        "from": "home",
+        "to": "orders.list"
+      },
+      {
+        "step": 2,
+        "from": "orders.list",
+        "to": "orders.list",
+        "preserve": [
+          "query",
+          "page"
+        ]
+      },
+      {
+        "step": 3,
+        "from": "orders.list",
+        "to": "orders.list"
+      },
+      {
+        "step": 5,
+        "from": "orders.list",
+        "to": "orders.list",
+        "preserve": [
+          "query",
+          "page"
+        ]
+      },
+      {
+        "step": 6,
+        "from": "orders.list",
+        "to": "home",
+        "drop": [
+          "query",
+          "page",
+          "items"
+        ]
+      }
+    ]
+  },
+  "assertions": [
+    {
+      "step": 0,
+      "field": "state",
+      "path": "/after/data",
+      "equals": {
+        "query": "open",
+        "page": 2,
+        "items": [
+          {
+            "id": 1,
+            "amount": 10,
+            "status": "open"
+          }
+        ]
+      }
+    },
+    {
+      "step": 2,
+      "field": "inputs",
+      "equals": {
+        "identifier": 1,
+        "status": "closed"
+      }
+    },
+    {
+      "step": 2,
+      "field": "state",
+      "path": "/after/data",
+      "equals": {
+        "query": "open",
+        "page": 2,
+        "items": []
+      }
+    },
+    {
+      "step": 3,
+      "field": "state",
+      "path": "/after/data/items",
+      "equals": [
+        {
+          "id": 3,
+          "amount": 30,
+          "status": "closed"
+        }
+      ]
+    },
+    {
+      "step": 5,
+      "field": "inputs",
+      "equals": {
+        "identifier": 3,
+        "status": "open"
+      }
+    },
+    {
+      "step": 5,
+      "field": "state",
+      "path": "/after/data",
+      "equals": {
+        "query": "closed",
+        "page": 1,
+        "items": [
+          {
+            "id": 1,
+            "amount": 10,
+            "status": "closed"
+          }
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "field": "state",
+      "path": "/after/data",
+      "equals": {}
+    },
+    {
+      "step": 0,
+      "field": "description",
+      "equals": "open 주문 2페이지 조회"
+    },
+    {
+      "step": 1,
+      "field": "description",
+      "equals": "실제 목록의 현재 주문과 검색 조건 확인"
+    },
+    {
+      "step": 2,
+      "field": "description",
+      "equals": "보이는 주문 상태 변경 후 같은 조건·페이지 재조회"
+    },
+    {
+      "step": 3,
+      "field": "description",
+      "equals": "closed 주문 1페이지 조회"
+    },
+    {
+      "step": 4,
+      "field": "description",
+      "equals": "변경할 현재 주문 데이터 확인"
+    },
+    {
+      "step": 5,
+      "field": "description",
+      "equals": "현재 컨텍스트의 상태로 변경하고 목록 교체"
+    },
+    {
+      "step": 6,
+      "field": "description",
+      "equals": "기능 종료 시 목록·조건·오류 정리"
+    }
+  ],
+  "links": [
+    {
+      "from": 1,
+      "to": 2,
+      "output": "/data/items/0/id",
+      "input": "/identifier"
+    },
+    {
+      "from": "context",
+      "to": 2,
+      "output": "/target_status",
+      "input": "/status"
+    },
+    {
+      "from": 4,
+      "to": 5,
+      "output": "/data/items/0/id",
+      "input": "/identifier"
+    },
+    {
+      "from": "context",
+      "to": 5,
+      "output": "/target_status",
+      "input": "/status"
+    }
+  ]
+}

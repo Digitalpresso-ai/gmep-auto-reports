@@ -1,0 +1,4 @@
+# Fonts
+
+- PretendardVariable.woff2 — Pretendard 1.3.9 by Kil Hyung-jin, SIL Open Font License 1.1.
+- JetBrainsMono-latin-wght.woff2 — JetBrains Mono (latin subset, variable weight), SIL Open Font License 1.1.

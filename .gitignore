@@ -1,0 +1,21 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+.DS_Store
+
+# 참가기업 실제 자료(사진·기안문·교육자료)는 저장소에 넣지 않는다
+data/
+
+.proofstill/work/
+.proofstill/test-results/
+.api-tracker/runtime/
+.api-tracker/flow-record.json
+.api-tracker/flow.lock
+.api-tracker/flow-record.json.*.tmp

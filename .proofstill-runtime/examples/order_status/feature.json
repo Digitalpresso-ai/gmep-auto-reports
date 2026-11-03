@@ -1,0 +1,158 @@
+{
+  "id": "order-status-v2",
+  "title": "목록 주문 상태 변경과 검색 조건 유지",
+  "intent": "사용자 원문: 작은 기능 하나를 실제로 이 스킬들로 처음부터 끝까지 개발해봐. 브리핑부터 독립 검증까지 어떻게 연결되는지 보여주고, 마지막에 근거 링크가 있는 완료 보고를 줘. 선택한 기능: 목록에서 현재 보이는 주문의 상태를 open/closed로 바꾸고 같은 검색 조건·페이지로 목록을 다시 조회한다.",
+  "context": "로컬 연습 기능. 실제 시험 과제 아님. 기존 Workspace/SQLite OrderStore를 확장한다. 목록에서만 상태 변경 가능하며 다른 화면·화면에 없는 ID·bool/문자열 ID·잘못된 status는 쓰기 전 거부한다. 같은 status 요청은 멱등 허용. query/page를 보존하며 새 items로 교체하고 성공은 error를 정리한다. 쓰기와 재조회는 하나의 SQLite 트랜잭션: 어느 쪽이든 실패하면 DB 롤백, 기존 화면·목록·조건 유지와 error만 추가한다. 기능 종료는 전체 화면 데이터 정리, 재진입 기본값 사용. 현재 페이지가 비면 자동 이동하지 않고 같은 페이지의 빈 목록을 표시한다. 상태 변경용 초안·선택 상태는 추가하지 않는다. 잘못된 저장소 ID/status(음수 포함)는 UPDATE 전 거부한다. 없는 양의 ID는 변경된 행 없음 확인 뒤 ValueError를 허용한다. 기능별 Trace 부정 사례는 잘못된 설명·값·단계 누락·순서·출처 없는 literal 입력을 거부해야 한다.",
+  "sources": [
+    "proofstill",
+    "examples",
+    ".agents/skills/proofstill-develop/SKILL.md",
+    ".agents/skills/proofstill-verify/SKILL.md"
+  ],
+  "context_files": [],
+  "requirements": [
+    {
+      "id": "R1",
+      "text": "목록에서 보이는 양의 정수 ID만 open/closed 상태 변경 가능. home/detail/edit·잘못된 입력·화면 밖 ID는 저장과 상태 변경 전에 거부한다.",
+      "checks": [
+        "status-workspace",
+        "status-store"
+      ]
+    },
+    {
+      "id": "R2",
+      "text": "쓰기 후 같은 query/page로 실제 목록 재조회. items는 정규 저장소 반환값으로 교체하고 임시 초안·선택·중복 데이터는 만들지 않는다. 같은 상태 요청은 멱등이다.",
+      "checks": [
+        "status-workspace",
+        "status-store"
+      ]
+    },
+    {
+      "id": "R3",
+      "text": "저장·재조회 실패는 DB 변경을 원자적으로 롤백하고 원래 목록·화면·조건을 유지하며 오류를 표시. 재시도 성공은 오류 제거.",
+      "checks": [
+        "status-workspace",
+        "status-store"
+      ]
+    },
+    {
+      "id": "R4",
+      "text": "기능 종료 시 query/page/items/error 정리, 재진입 기본값 복원. 실제 DB 저장과 reopen·미대상 주문 및 금액 불변 검증.",
+      "checks": [
+        "status-workspace",
+        "status-store"
+      ]
+    },
+    {
+      "id": "R5",
+      "text": "실제 workflow를 Trace로 기록하고 단계 설명·실제 조회 데이터와 현재 컨텍스트 출처·화면별 허용 상태·유지/제거를 사전 기대값으로 검사한다.",
+      "checks": [
+        "status-store"
+      ]
+    },
+    {
+      "id": "R6",
+      "text": "기존 하네스와 주문 기능의 회귀 테스트를 현재 소스에서 통과한다.",
+      "checks": [
+        "harness-regression"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "status-workspace",
+      "kind": "unit",
+      "module": "status-workspace",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "examples/order_status/tests/unit",
+        "-v"
+      ],
+      "files": [
+        "examples/order_status/tests/unit"
+      ],
+      "red_pattern": "AssertionError: .*STATUS_WORKSPACE_NOT_IMPLEMENTED",
+      "green_pattern": "Ran [1-9][0-9]* tests?[\\s\\S]*\\bOK\\b",
+      "timeout": 30
+    },
+    {
+      "id": "status-store",
+      "kind": "integration",
+      "module": "status-store",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "examples/order_status/tests/integration",
+        "-v"
+      ],
+      "files": [
+        "examples/order_status/tests/integration"
+      ],
+      "red_pattern": "AssertionError: .*STATUS_STORE_NOT_IMPLEMENTED",
+      "green_pattern": "Ran [1-9][0-9]* tests?[\\s\\S]*\\bOK\\b",
+      "timeout": 30,
+      "trace_expectation": "examples/order_status/expected.json"
+    },
+    {
+      "id": "harness-regression",
+      "kind": "unit",
+      "module": "harness-regression",
+      "regression": true,
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "files": [
+        "tests"
+      ],
+      "green_pattern": "Ran [1-9][0-9]* tests?[\\s\\S]*\\bOK\\b",
+      "timeout": 60
+    }
+  ],
+  "artifacts": [
+    {
+      "label": "주문 화면·상태 코드",
+      "path": "examples/order_workspace/workspace.py"
+    },
+    {
+      "label": "SQLite 상태 변경·재조회",
+      "path": "examples/order_workspace/store.py"
+    },
+    {
+      "label": "실제 Trace 시나리오",
+      "path": "examples/order_status/scenario.py"
+    },
+    {
+      "label": "고정 IA·상태 전이·데이터 출처",
+      "path": "examples/order_status/expected.json"
+    },
+    {
+      "label": "Unit test",
+      "path": "examples/order_status/tests/unit/test_status.py"
+    },
+    {
+      "label": "Integration test",
+      "path": "examples/order_status/tests/integration/test_status.py"
+    },
+    {
+      "label": "작업 시작 브리핑",
+      "path": ".proofstill/evidence/order-status-v2/brief-initial.md"
+    }
+  ],
+  "limitations": [
+    "제품의 클릭 UI·외부 API·동시 사용자 갱신은 범위 밖이며 기존 화면·상태 모델의 로컬 기능이다.",
+    "페이지가 비어도 동일 페이지 유지라는 예시 정책. 숨은 메모리 상태는 관측하지 않는다."
+  ]
+}

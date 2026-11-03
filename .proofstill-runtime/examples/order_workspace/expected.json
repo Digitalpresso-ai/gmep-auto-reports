@@ -1,0 +1,53 @@
+{
+  "name": "주문 작업과 상태 수명",
+  "operations": ["orders.search", "orders.select", "orders.fetch", "orders.receive", "orders.edit", "orders.change", "orders.save", "orders.back", "orders.select", "orders.select", "orders.fetch", "orders.receive", "orders.fetch", "orders.receive-stale", "orders.leave", "orders.receive-after-exit"],
+  "state": {
+    "screens": {
+      "home": {"feature": "home", "required": []},
+      "orders.list": {"feature": "orders", "required": ["query", "page", "items"]},
+      "orders.detail": {"feature": "orders", "required": ["query", "page", "selected_id", "detail"], "optional": ["request"]},
+      "orders.edit": {"feature": "orders", "required": ["query", "page", "selected_id", "draft"], "optional": ["error"]}
+    },
+    "transitions": [
+      {"step": 0, "from": "home", "to": "orders.list"},
+      {"step": 1, "from": "orders.list", "to": "orders.detail", "preserve": ["query", "page"], "drop": ["items"]},
+      {"step": 3, "from": "orders.detail", "to": "orders.detail", "preserve": ["query", "page", "selected_id"], "drop": ["request"]},
+      {"step": 4, "from": "orders.detail", "to": "orders.edit", "preserve": ["query", "page", "selected_id"], "drop": ["detail"]},
+      {"step": 5, "from": "orders.edit", "to": "orders.edit", "preserve": ["query", "page", "selected_id"]},
+      {"step": 6, "from": "orders.edit", "to": "orders.detail", "preserve": ["query", "page", "selected_id"], "drop": ["draft"]},
+      {"step": 7, "from": "orders.detail", "to": "orders.list", "preserve": ["query", "page"], "drop": ["selected_id", "detail"]},
+      {"step": 8, "from": "orders.list", "to": "orders.detail", "preserve": ["query", "page"], "drop": ["items"]},
+      {"step": 9, "from": "orders.detail", "to": "orders.detail", "preserve": ["query", "page"]},
+      {"step": 11, "from": "orders.detail", "to": "orders.detail", "preserve": ["query", "page", "selected_id"], "drop": ["request"]},
+      {"step": 13, "from": "orders.detail", "to": "orders.detail", "preserve": ["query", "page", "selected_id", "detail"]},
+      {"step": 14, "from": "orders.detail", "to": "home", "drop": ["query", "page", "selected_id", "detail"]},
+      {"step": 15, "from": "home", "to": "home"}
+    ]
+  },
+  "assertions": [
+    {"step": 5, "field": "state", "path": "/after/data/draft/amount", "equals": 35},
+    {"step": 6, "field": "state", "path": "/after/data/detail/amount", "equals": 35},
+    {"step": 7, "field": "state", "path": "/after/data/items/0/amount", "equals": 35},
+    {"step": 13, "field": "state", "path": "/after/data/selected_id", "equals": 2},
+    {"step": 13, "field": "output", "equals": false},
+    {"step": 14, "field": "state", "path": "/after/data", "equals": {}},
+    {"step": 15, "field": "output", "equals": false},
+    {"step": 0, "field": "state", "path": "/after/data", "equals": {"query": "open", "page": 2, "items": [{"id": 1, "amount": 10, "status": "open"}]}},
+    {"step": 2, "field": "inputs", "path": "/identifier", "equals": 1},
+    {"step": 2, "field": "output", "path": "/id", "equals": 1},
+    {"step": 10, "field": "inputs", "path": "/identifier", "equals": 2},
+    {"step": 10, "field": "output", "path": "/id", "equals": 2},
+    {"step": 12, "field": "inputs", "path": "/identifier", "equals": 1},
+    {"step": 12, "field": "output", "path": "/id", "equals": 1}
+  ],
+  "links": [
+    {"from": 1, "to": 3, "output": "", "input": "/ticket"},
+    {"from": 2, "to": 3, "output": "", "input": "/row"},
+    {"from": 9, "to": 11, "output": "", "input": "/ticket"},
+    {"from": 10, "to": 11, "output": "", "input": "/row"},
+    {"from": 8, "to": 13, "output": "", "input": "/ticket"},
+    {"from": 12, "to": 13, "output": "", "input": "/row"},
+    {"from": 8, "to": 15, "output": "", "input": "/ticket"},
+    {"from": 12, "to": 15, "output": "", "input": "/row"}
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "UX 저장 실패와 재시도",
+  "state": {
+    "initial": "editing",
+    "states": {
+      "editing": {"feature": "profile", "screen": "profile.edit", "required": ["draft"]},
+      "saving": {"feature": "profile", "screen": "profile.edit", "required": ["draft"]},
+      "failed": {"feature": "profile", "screen": "profile.edit", "required": ["draft", "error"]},
+      "saved": {"feature": "profile", "screen": "profile.detail", "required": ["profile"]}
+    },
+    "transitions": {
+      "submit": {"from": "editing", "to": "saving", "operation": "profile.submit", "preserve": ["draft"]},
+      "save-failed": {"from": "saving", "to": "failed", "operation": "profile.failure", "preserve": ["draft"]},
+      "retry": {"from": "failed", "to": "saving", "operation": "profile.retry", "preserve": ["draft"], "drop": ["error"]},
+      "save-succeeded": {"from": "saving", "to": "saved", "operation": "profile.success", "drop": ["draft"]}
+    },
+    "required_transitions": ["submit", "save-failed", "retry", "save-succeeded"]
+  },
+  "assertions": [
+    {"step": 1, "field": "state", "path": "/after/data/draft/name", "equals": "수정한 이름"},
+    {"step": 3, "field": "state", "path": "/after/data/profile/name", "equals": "수정한 이름"}
+  ]
+}
