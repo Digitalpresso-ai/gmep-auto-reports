@@ -73,9 +73,12 @@ it(`라운드 ${ROUND}`, async () => {
   const photos = selected.map((p, i) => ({ key: keys[i], bytes: new Uint8Array(fs.readFileSync(p.jpgPath)), width: p.width, height: p.height, type: "jpg" as const }));
   const docx = path.join(out, "report.docx");
   fs.writeFileSync(docx, await buildDocx([{ html, photos }]));
-  execFileSync("soffice", ["--headless", "--convert-to", "pdf", "--outdir", out, docx], { stdio: "ignore" });
-  for (const f of fs.readdirSync(out)) if (f.startsWith("page-")) fs.rmSync(path.join(out, f));
-  execFileSync("pdftoppm", ["-jpeg", "-r", "70", path.join(out, "report.pdf"), path.join(out, "page")]);
+  // Word 레이아웃을 눈으로 볼 때만 LibreOffice로 PDF·쪽 이미지를 만든다(EVAL_RENDER=1). 채점·서비스에는 필요 없다.
+  if (process.env.EVAL_RENDER === "1") {
+    execFileSync("soffice", ["--headless", "--convert-to", "pdf", "--outdir", out, docx], { stdio: "ignore" });
+    for (const f of fs.readdirSync(out)) if (f.startsWith("page-")) fs.rmSync(path.join(out, f));
+    execFileSync("pdftoppm", ["-jpeg", "-r", "70", path.join(out, "report.pdf"), path.join(out, "page")]);
+  }
 
   const meta = {
     round: ROUND,
