@@ -80,7 +80,7 @@
 | DATA-1 | 테이블 예시: companies, reports(회사별 날짜 유일), report_photos, ai_usage, login_attempts | p.4 §5-1 | 1차 | `db/migrations/0001~0004` / `tests/db/migration.test.ts` | 검증됨 |
 | DATA-2 | 사진은 객체 저장소, 회사별 폴더 분리, 서명 URL로만 제공 | p.4 §5-1 | 1차 | `src/server/storage.ts`, `src/server/photos.ts` / `tests/api/company.test.ts`(가짜 저장소) | 구현 중(회사별 경로·서명 URL 코드. 실제 Supabase 미검증) |
 | DATA-3 | 보관 기한은 프로그램 종료일부터 1개월로 고정. 로그인 화면에 안내 문구 표시, 기한 후 일괄 삭제. 종료일 기본값 2026-11-30(11월 마지막 날) → 보관 기한 2026-12-30. 종료일 값은 코드에 고정하지 않고 설정으로 바꿀 수 있게 함 | p.5 §5-3, 2026-11-03 사용자 답변("프로그램 종료일부터 한달로 고정", "11월 마지막일") | 1차(문구)·종료(삭제) | `src/server/settings.ts`, `GET /api/notice`, `Login.tsx` / `tests/api/company.test.ts`, `tests/domain/dates.test.ts` | 구현 중(안내 문구·종료일 설정 검증됨. 일괄 삭제는 종료 시) |
-| OPS-1 | Vercel Hobby 배포, HTTPS. 주소 gmep-report.renamedp.ai. 주소는 코드에 고정하지 않고 환경변수 하나로 바꿀 수 있어야 함 | p.4 §5-2, 2026-11-03 사용자 답변 | 1차 | — | 미구현 |
+| OPS-1 | Vercel Hobby 배포, HTTPS. 주소는 Vercel 기본 도메인 https://gmep-auto-reports.vercel.app/. 코드는 도메인을 쓰지 않고 상대 경로만 사용하므로 도메인을 바꿔도 코드 수정이 필요 없음 | p.4 §5-2, 2026-11-03 사용자 답변("그냥 기본 도메인으로") | 1차 | `vercel.json` / 배포 주소에서 로그인 화면·회사 목록 API 확인(2026-11-03) | 검증됨(배포 접속) |
 | OPS-2 | 유럽(베를린·헬싱키) 접속 허용, 속도 확인 | p.4 §5-2 | 1차 | — | 미구현 |
 | OPS-3 | 업로드 요청당 50MB 이상 허용 또는 ZIP은 브라우저에서 처리 | p.4 §5-2 | 1차 | `src/client/files.ts` unzip, 원본 서명 업로드 URL | 구현 중(ZIP 브라우저 처리 로컬 확인. 서명 업로드는 실제 Supabase 미검증) |
 | OPS-4 | 종료 시 데이터 일괄 삭제, API 키 폐기 | p.5 §6-1 | 종료 | — | 미구현 |
@@ -112,7 +112,7 @@
 | D1 | 월 AI 예산 상한(원), Console spend limit 금액 | OPS-5, AI-11 | p.5 §6-3 | Anthropic이 주는 API 한도만큼(2026-11-03 사용자 답변). 별도 금액 없음 |
 | D2 | 회사별 한도 생성 1일 5회·수정 15회 안을 그대로 쓰는지 | AI-9 | p.5 §6-3 | 지시서대로 생성 5회·수정 15회(2026-11-03 사용자 답변 "지시서 대로 가자") |
 | D3 | 데이터 보관 기한(안: 2026-12-31) | DATA-3, OPS-4 | p.5 §6-3 | 프로그램 종료일부터 1개월(2026-11-03 사용자 답변, 앞선 "2달" 답변을 정정). 종료일 2026-11-30 |
-| D4 | 접속 주소(도메인) | OPS-1 | p.5 §6-3 | gmep-report.renamedp.ai, 쉽게 바꿀 수 있게(2026-11-03 사용자 답변) |
+| D4 | 접속 주소(도메인) | OPS-1 | p.5 §6-3 | Vercel 기본 도메인 gmep-auto-reports.vercel.app(2026-11-03 사용자 답변, 앞선 gmep-report.renamedp.ai를 바꿈) |
 | D5 | 초기 비밀번호 전달 방법 | AUTH-3 | p.5 §6-3 | 관리자가 만들어 직접 전달, 회사 비밀번호 변경 기능 추가(AUTH-11) (2026-11-03 사용자 답변) |
 | D6 | 개발·배포 스택과 폴더 구조 | 전체 | p.4 §5-2, [시니어 개발자 인터뷰](.agents/skills/proofstill-engineer/SKILL.md) | Next.js + Supabase (2026-11-03 사용자 답변 "Next.js+Supabase"). Supabase CLI 미사용. 폴더는 AGENTS.md "스택과 폴더" |
 | D7 | 운영사 명단 대조 후 회사명 확정 | COMP-1, AUTH-2 | p.6 §6-4 | 20번째 회사명은 미정. 19개사로 시작하고 관리자 페이지에서 추가(2026-11-03 사용자 인터뷰). 오탈자는 발견 시 관리자 페이지에서 수정(2026-11-03 사용자 답변 "D7 맞아") |
