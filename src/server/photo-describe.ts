@@ -36,24 +36,30 @@ export async function describeImage(model: string, bytes: Uint8Array, mediaType:
   return describeText(JSON.parse(res.text));
 }
 
+async function describeRow(model: string, r: { id: string; storage_path: string }): Promise<boolean> {
+  try {
+    const description = await describeImage(model, await getObject(r.storage_path), r.storage_path.endsWith(".png") ? "image/png" : "image/jpeg");
+    await db()`update shared_files set description = ${description} where id = ${r.id} and description is null`;
+    return true;
+  } catch (e) {
+    console.error("사진 설명 실패", { id: r.id, error: e instanceof Error ? e.message : String(e) });
+    return false;
+  }
+}
+
+/** 방금 올린 공통 사진 한 장을 설명한다. 실패하면 설명 없이 남겨 관리자가 '사진 설명 만들기'로 다시 시도한다. */
+export async function describePhoto(id: string): Promise<void> {
+  const [r] = await db()<{ id: string; storage_path: string }[]>`select id, storage_path from shared_files where id = ${id} and kind = 'photo' and description is null`;
+  if (r) await describeRow(await aiModel(), r);
+}
+
 /** 그날 설명이 없는 공통 사진을 최대 limit장 설명한다. 실패한 사진은 null로 남겨 다시 시도할 수 있게 한다. */
 export async function describePendingPhotos(date: string, limit: number): Promise<{ described: number; failed: number; remaining: number }> {
   const sql = db();
   const rows = await sql<{ id: string; storage_path: string }[]>`
     select id, storage_path from shared_files where report_date = ${date} and kind = 'photo' and description is null order by created_at, id limit ${limit}`;
   const model = await aiModel();
-  const results = await Promise.all(
-    rows.map(async (r) => {
-      try {
-        const description = await describeImage(model, await getObject(r.storage_path), r.storage_path.endsWith(".png") ? "image/png" : "image/jpeg");
-        await sql`update shared_files set description = ${description} where id = ${r.id}`;
-        return true;
-      } catch (e) {
-        console.error("사진 설명 실패", { id: r.id, error: e instanceof Error ? e.message : String(e) });
-        return false;
-      }
-    }),
-  );
+  const results = await Promise.all(rows.map((r) => describeRow(model, r)));
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from shared_files where report_date = ${date} and kind = 'photo' and description is null`;
   const described = results.filter(Boolean).length;
   return { described, failed: results.length - described, remaining: n };

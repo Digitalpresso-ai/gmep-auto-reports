@@ -7,6 +7,12 @@ import { companyWithPassword, cookieOf, loginCookie, params, request, startDb, t
 vi.mock("@/server/storage", () => import("./fake-storage"));
 const callModel = vi.fn<(r: ModelRequest) => Promise<ModelResult>>();
 vi.mock("@/server/ai", () => ({ callModel: (r: ModelRequest) => callModel(r) }));
+// 응답 뒤 작업은 모아 두었다가 테스트가 원할 때 실행한다
+const background: (() => Promise<void>)[] = [];
+vi.mock("@/server/background", () => ({ afterResponse: (fn: () => Promise<void>) => void background.push(fn) }));
+const runBackground = async () => {
+  while (background.length) await background.shift()!();
+};
 
 let t: TestDb;
 let admin: string;
@@ -239,6 +245,30 @@ describe("PHOTO-1 공통 사진 설명", () => {
     callModel.mockResolvedValueOnce(answer(JSON.stringify({ scene: "단체 사진", activity: "단체사진", visible_text: "" })));
     expect(await (await describeAll()).json()).toEqual({ described: 1, failed: 0, remaining: 0 });
     expect(callModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("공통 사진을 올리면 응답 뒤 바로 그 사진의 설명을 저장한다. 일정 이미지는 설명하지 않는다", async () => {
+    await runBackground();
+    callModel.mockReset();
+    callModel.mockResolvedValue(answer(JSON.stringify({ scene: "네트워킹 장면", activity: "네트워킹", visible_text: "" })));
+    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
+    const photo = await (await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: "2026-11-10" }))).json();
+    const sched = await (await POST(request("POST", "/x", { cookie: admin, form: photoForm("schedule_image") }), params({ date: "2026-11-10" }))).json();
+    await runBackground();
+    expect(callModel).toHaveBeenCalledTimes(1);
+    const rows = await t.sql<{ id: string; description: string | null }[]>`select id, description from shared_files where id in (${photo.id}, ${sched.id})`;
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.description]))).toEqual({ [photo.id]: "[네트워킹] 네트워킹 장면", [sched.id]: null });
+  });
+
+  it("업로드 뒤 설명이 실패해도 업로드는 성공하고 사진은 설명 없이 남는다", async () => {
+    callModel.mockReset();
+    callModel.mockRejectedValue(new Error("overloaded"));
+    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
+    const res = await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: "2026-11-11" }));
+    expect(res.status).toBe(201);
+    await runBackground();
+    const [row] = await t.sql`select description from shared_files where id = ${(await res.json()).id}`;
+    expect(row.description).toBeNull();
   });
 
   it("관리자 쿠키가 없으면 401이다", async () => {
