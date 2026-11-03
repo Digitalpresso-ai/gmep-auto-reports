@@ -20,7 +20,18 @@ export async function usageCounts(companyId: string, now = new Date()): Promise<
   };
 }
 
-export async function recordUsage(entry: { companyId: string; kind: "generate" | "revise"; model: string; inputTokens: number; outputTokens: number; success: boolean }) {
-  await db()`insert into ai_usage (company_id, kind, model, input_tokens, output_tokens, success)
-             values (${entry.companyId}, ${entry.kind}, ${entry.model}, ${entry.inputTokens}, ${entry.outputTokens}, ${entry.success})`;
+export type UsageEntry = {
+  companyId: string;
+  kind: "generate" | "revise";
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  success: boolean;
+};
+
+export async function recordUsage(e: UsageEntry) {
+  await db()`insert into ai_usage (company_id, kind, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, success)
+             values (${e.companyId}, ${e.kind}, ${e.model}, ${e.inputTokens}, ${e.outputTokens}, ${e.cacheReadTokens ?? 0}, ${e.cacheWriteTokens ?? 0}, ${e.success})`;
 }

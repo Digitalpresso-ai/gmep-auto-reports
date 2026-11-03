@@ -68,6 +68,9 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
   return {
     model: await aiModel(),
     prompt,
+    // 같은 자료로 다시 만들거나 AI로 고칠 때 이 앞부분(일정 이미지·자료·규칙)을 캐시에서 읽는다. 생성 1~3분과
+    // 회사가 보고서를 읽고 수정을 요청하기까지의 간격이 5분을 넘기 쉬워 1시간 캐시를 쓴다(AI-13).
+    cacheTtl: "1h",
     jsonSchema: REPORT_JSON_SCHEMA,
     photoKeys: photos.map((p) => p.key),
     images: bytes.map((b, idx) => ({ mediaType: mediaTypeOf(images[idx].storage_path), base64: Buffer.from(b).toString("base64") })),
@@ -99,7 +102,16 @@ export async function generateReport(companyId: string, date: string, overwrite:
         return { kind: "ai_failed" };
       }
       const parsed = parseModelJson(result.text);
-      await recordUsage({ companyId, kind: "generate", model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, success: parsed !== null });
+      await recordUsage({
+        companyId,
+        kind: "generate",
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+        success: parsed !== null,
+      });
       if (!parsed) continue;
       const report = normalizeReport(parsed);
       const bodyHtml = renderReportHtml(report, req.photoKeys);

@@ -18,7 +18,9 @@ const goodJson = JSON.stringify({
   schedule: [["09:30", "온보딩", "참석 완료"]],
   achievements: [{ t: "현지 거점 확보", sub: ["코워킹 이용"] }],
 });
-const reply = (text: string, inputTokens = 1000, outputTokens = 500): ModelResult => ({ text, inputTokens, outputTokens, model: "claude-sonnet-5-5", stopReason: "end_turn" });
+const reply = (text: string, inputTokens = 1000, outputTokens = 500, cacheReadTokens = 0, cacheWriteTokens = 0): ModelResult => ({
+  text, inputTokens, outputTokens, model: "claude-sonnet-5-5", stopReason: "end_turn", cacheReadTokens, cacheWriteTokens,
+});
 
 beforeAll(async () => {
   t = await startDb();
@@ -64,10 +66,23 @@ describe("FUNC-8·AI-1 보고서 생성", () => {
     expect(req.prompt).toContain("CTO 미팅");
     expect(req.prompt).toContain("기안 본문");
     expect(req.images).toEqual([{ mediaType: "image/jpeg", base64: Buffer.from([1, 2, 3]).toString("base64") }]);
+    // 같은 자료로 다시 만들거나 AI로 고칠 때 이 프롬프트를 캐시에서 읽는다(AI-13)
+    expect(req.cacheTtl).toBe("1h");
+    expect(req.followUp).toBeUndefined();
   });
 
   it("호출마다 사용량을 회사·종류·모델·성공 여부와 함께 기록한다(AI-12)", async () => {
     expect(await usageRows(a.id)).toEqual([{ kind: "generate", success: true, input_tokens: 1000, output_tokens: 500, model: "claude-sonnet-5-5" }]);
+  });
+
+  it("캐시에 쓰고 읽은 입력 토큰을 따로 기록한다(AI-13)", async () => {
+    const d = "2026-11-03";
+    callModel.mockResolvedValueOnce(reply(goodJson, 30_000, 500, 20_000, 9_000));
+    expect((await generate(a.cookie, {}, d)).status).toBe(200);
+    const [row] = await t.sql`select input_tokens, cache_read_tokens, cache_write_tokens from ai_usage where company_id = ${a.id} order by id desc limit 1`;
+    expect(row).toEqual({ input_tokens: 30_000, cache_read_tokens: 20_000, cache_write_tokens: 9_000 });
+    await t.sql`delete from reports where company_id = ${a.id} and report_date = ${d}`;
+    await t.sql`delete from ai_usage where company_id = ${a.id} and cache_read_tokens > 0`;
   });
 
   it("저장한 보고서를 다시 불러온다", async () => {

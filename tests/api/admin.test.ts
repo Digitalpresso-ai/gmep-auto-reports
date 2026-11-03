@@ -217,7 +217,7 @@ describe("PHOTO-1 공통 사진 설명", () => {
   const date = "2026-11-09";
   const describeAll = async (cookie = admin) =>
     (await import("@/app/api/admin/days/[date]/files/describe/route")).POST(request("POST", "/x", { cookie }), params({ date }));
-  const answer = (text: string): ModelResult => ({ text, inputTokens: 900, outputTokens: 80, model: "claude-sonnet-5-5", stopReason: "end_turn" });
+  const answer = (text: string): ModelResult => ({ text, inputTokens: 900, outputTokens: 80, model: "claude-sonnet-5-5", stopReason: "end_turn", cacheReadTokens: 0, cacheWriteTokens: 0 });
 
   it("설명이 없는 공통 사진만 사진 이미지와 함께 AI에 보내 설명을 저장한다. 일정 이미지는 설명하지 않는다", async () => {
     const { POST } = await import("@/app/api/admin/days/[date]/files/route");

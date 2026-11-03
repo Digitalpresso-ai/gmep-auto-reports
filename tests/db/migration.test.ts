@@ -18,7 +18,7 @@ afterAll(async () => {
 
 describe("DATA-1 스키마", () => {
   it("migration을 순서대로 적용하고 두 번째 실행은 아무것도 적용하지 않는다", async () => {
-    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql", "0005_photo_descriptions.sql", "0006_report_revisions.sql"]);
+    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql", "0005_photo_descriptions.sql", "0006_report_revisions.sql", "0007_usage_cache_tokens.sql"]);
     expect(await migrate(sql)).toEqual([]);
   });
 

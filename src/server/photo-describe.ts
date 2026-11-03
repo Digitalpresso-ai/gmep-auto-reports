@@ -24,6 +24,8 @@ export function describeText(v: { scene?: unknown; activity?: unknown; visible_t
   return [s(v.activity) && `[${s(v.activity)}]`, s(v.scene), s(v.visible_text) && `화면 글자: "${s(v.visible_text)}"`].filter(Boolean).join(" ").slice(0, 2000);
 }
 
+// 프롬프트 캐싱은 쓰지 않는다. 사진마다 같은 부분은 이 지시문(수백 토큰)뿐이라 캐시 최소 길이(512토큰)에 못 미치고,
+// 입력의 대부분인 사진은 장마다 달라 캐시할 수 없다(AI-13).
 export async function describeImage(model: string, bytes: Uint8Array, mediaType: "image/jpeg" | "image/png"): Promise<string> {
   const res = await callModel({
     model,
