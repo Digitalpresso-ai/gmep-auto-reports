@@ -20,10 +20,15 @@
     "@anthropic-ai/sdk": "^1.4.0",
     "@supabase/supabase-js": "^2.118.0",
     "bcryptjs": "^3.0.3",
+    "docx": "^9.15.1",
+    "htmlparser2": "^12.0.0",
+    "jszip": "^3.10.2",
     "next": "16.4.4",
+    "pdfjs-dist": "^6.5.438",
     "postgres": "^4.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "sanitize-html": "^2.18.1",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
@@ -32,6 +37,7 @@
     "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/sanitize-html": "^2.16.2",
     "eslint": "^9",
     "eslint-config-next": "16.4.4",
     "tailwindcss": "^4",
