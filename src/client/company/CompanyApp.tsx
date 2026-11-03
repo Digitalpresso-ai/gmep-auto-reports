@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api";
 import { CompanyInfo } from "./CompanyInfo";
 import { Login } from "./Login";
@@ -14,6 +14,7 @@ type View = "loading" | "login" | "first-password" | "info" | "work" | "password
 export function CompanyApp() {
   const [view, setView] = useState<View>("loading");
   const [me, setMe] = useState<Me | null>(null);
+  const menu = useRef<HTMLDetailsElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,13 +52,19 @@ export function CompanyApp() {
         <span className="app-title">GMEP 일일 출장보고서</span>
         <span className="spacer" />
         <span className="who">{me?.company.label}</span>
-        {view === "work" && (
-          <>
-            <button type="button" className="btn btn-small" onClick={() => setView("info")}>회사 정보</button>
-            <button type="button" className="btn btn-small" onClick={() => setView("password")}>비밀번호 변경</button>
-          </>
-        )}
-        <button type="button" className="btn btn-small" onClick={logout}>로그아웃</button>
+        {/* 휴대폰 상단을 한 줄로 유지하려고 계정 기능은 메뉴 하나에 모은다 */}
+        <details className="menu" ref={menu}>
+          <summary className="btn btn-small" aria-label="메뉴">☰</summary>
+          <div className="menu-list" onClick={() => menu.current?.removeAttribute("open")}>
+            {view === "work" && (
+              <>
+                <button type="button" onClick={() => setView("info")}>회사 정보</button>
+                <button type="button" onClick={() => setView("password")}>비밀번호 변경</button>
+              </>
+            )}
+            <button type="button" onClick={logout}>로그아웃</button>
+          </div>
+        </details>
       </header>
       {view === "info" && me && <CompanyInfo profile={me.company} onSaved={refresh} onCancel={me.company.traveler || me.company.proposalFilename ? () => setView("work") : undefined} />}
       {view === "password" && <PasswordForm first={false} onDone={() => setView("work")} onCancel={() => setView("work")} />}
