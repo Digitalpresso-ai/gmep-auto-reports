@@ -205,6 +205,17 @@ input, textarea, select { font-size: 16px; }
 .savestate { font-size: 13px; color: var(--text-muted); }
 .savestate.err { color: var(--dp-danger); }
 
+.revise {
+  background: var(--surface-card); border: 1px solid var(--border-card); border-radius: var(--radius-lg);
+  padding: 14px 16px; margin: 0 auto 12px; max-width: 860px;
+}
+.revise h2 { font-size: 15px; margin: 0 0 8px; color: var(--text-strong); }
+.revise-log { margin: 0 0 10px; padding-left: 22px; list-style: decimal; font-size: 14px; color: var(--text-muted); max-height: 160px; overflow-y: auto; }
+.revise-log li { margin: 2px 0; white-space: pre-wrap; }
+.revise-row { display: flex; gap: 8px; align-items: flex-start; }
+.revise-row .textarea { flex: 1; min-height: 48px; }
+@media (max-width: 700px) { .revise-row { flex-direction: column; align-items: stretch; } }
+
 .paper {
   background: var(--dp-white); border: 1px solid var(--border-card); border-radius: 4px; box-shadow: var(--shadow-md);
   padding: 48px 56px; min-height: 600px; max-width: 860px; margin: 0 auto;

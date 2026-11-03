@@ -38,3 +38,4 @@ export type DayView = {
 };
 
 export type ReportDoc = { title: string; bodyHtml: string; updatedAt: string };
+export type Revision = { request: string; createdAt: string };

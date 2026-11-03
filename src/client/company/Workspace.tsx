@@ -4,7 +4,7 @@ import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
 import { ApiError, api, errorText, fmtDate, kstToday } from "../api";
 import { useDialog } from "../dialog";
 import { imageForm, toJpeg } from "../files";
-import type { DayView, PhotoRef, Profile, ReportDoc, Usage } from "./types";
+import type { DayView, PhotoRef, Profile, ReportDoc, Revision, Usage } from "./types";
 
 type DraftPatch = { scheduleText?: string; selectedPhotos?: PhotoRef[]; notes?: string };
 type Status = { kind: "err" | "ok" | "info" | "warn"; text: string; retry?: boolean } | null;
@@ -12,7 +12,7 @@ type Status = { kind: "err" | "ok" | "info" | "warn"; text: string; retry?: bool
 const AUTO_SELECT_MAX = 4;
 const sameRef = (a: PhotoRef, b: PhotoRef) => a.source === b.source && a.id === b.id;
 
-// H0 작성 화면 → E1/E2 입력 → G1 생성 중 / G2 실패 / Q1 한도 소진 → R1 미리보기·편집 / R2 저장 실패 → W1 Word
+// H0 작성 화면 → E1/E2 입력 → G1 생성 중 / G2 실패 / Q1 한도 소진 → R1 미리보기·편집 / R2 저장 실패 → V1 AI 수정 → W1 Word
 export function Workspace({ profile }: { profile: Profile }) {
   const [date, setDate] = useState(kstToday);
   const [day, setDay] = useState<DayView | null>(null);
@@ -24,6 +24,10 @@ export function Workspace({ profile }: { profile: Profile }) {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [report, setReport] = useState<ReportDoc | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [revising, setRevising] = useState(false);
+  const [revisions, setRevisions] = useState<Revision[]>([]);
+  const [reviseText, setReviseText] = useState("");
+  const [reviseStatus, setReviseStatus] = useState<Status>(null);
   const [elapsed, setElapsed] = useState(0);
   const [status, setStatus] = useState<Status>(null);
   const [draftSaving, setDraftSaving] = useState<"" | "saving" | "saved" | "error">("");
@@ -109,14 +113,16 @@ export function Workspace({ profile }: { profile: Profile }) {
       await api(`/api/days/${d}/draft`, { method: "PUT", body: { selectedPhotos: sel } });
     }
     const r = v.report ? await api<ReportDoc>(`/api/days/${d}/report`) : null;
-    return { v, sel, r };
+    const revs = r ? (await api<{ revisions: Revision[] }>(`/api/days/${d}/report/revisions`)).revisions : [];
+    return { v, sel, r, revs };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     load(date).then(
-      ({ v, sel, r }) => {
+      ({ v, sel, r, revs }) => {
         if (cancelled) return;
+        setRevisions(revs);
         setDay(v);
         setSchedule(v.schedule.text);
         setNotes(v.notes);
@@ -137,6 +143,9 @@ export function Workspace({ profile }: { profile: Profile }) {
     await Promise.all([flushDraft(), flushReport()]);
     setDay(null);
     setReport(null);
+    setRevisions([]);
+    setReviseText("");
+    setReviseStatus(null);
     setStatus(null);
     setReportSave({ text: "", err: false });
     setDraftSaving("");
@@ -182,12 +191,15 @@ export function Workspace({ profile }: { profile: Profile }) {
 
   useEffect(fillPhotos, [fillPhotos]);
 
+  // 생성과 AI 수정은 서버가 회사별로 하나만 받으므로 둘 중 하나가 도는 동안 입력을 막는다
+  const aiBusy = generating || revising;
+
   useEffect(() => {
-    if (!generating) return;
+    if (!aiBusy) return;
     const started = Date.now();
     const t = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(t);
-  }, [generating]);
+  }, [aiBusy]);
 
   // 창을 닫기 전에 남은 저장을 보낸다
   useEffect(() => {
@@ -278,6 +290,8 @@ export function Workspace({ profile }: { profile: Profile }) {
       const r = await api<{ report: ReportDoc; usage: Usage }>(`/api/days/${date}/report`, { body: { overwrite } });
       setUsage(r.usage);
       setReport(r.report);
+      setRevisions([]);
+      setReviseStatus(null);
       setDay((d) => (d ? { ...d, report: { title: r.report.title, updatedAt: r.report.updatedAt } } : d));
       setReportSave({ text: "저장됨", err: false });
       setStatus({ kind: "ok", text: "보고서를 만들어 저장했습니다. 문장을 눌러 고친 뒤 Word로 받으세요." });
@@ -286,6 +300,34 @@ export function Workspace({ profile }: { profile: Profile }) {
       setStatus({ kind: "err", text: errorText(e), retry: e instanceof ApiError && e.status !== 429 && e.code !== "report_exists" });
     } finally {
       setGenerating(false);
+    }
+  }
+
+  // ---------- AI 수정(FUNC-10) ----------
+  const reviseLimitReached = usage ? usage.reviseRemaining <= 0 || usage.tokenLimitReached : false;
+
+  async function revise() {
+    const request = reviseText.trim();
+    if (!request || aiBusy) return;
+    // 서버는 저장된 보고서를 고치므로 직접 고친 내용을 먼저 저장한다
+    if (!(await flushReport())) return setReviseStatus({ kind: "err", text: "직접 고친 내용을 저장하지 못해 AI 수정을 보내지 않았습니다. 다시 저장한 뒤 시도해 주세요." });
+    setRevising(true);
+    setElapsed(0);
+    setReviseStatus(null);
+    try {
+      const r = await api<{ report: ReportDoc; usage: Usage; revisions: Revision[] }>(`/api/days/${date}/report/revisions`, { body: { request } });
+      setUsage(r.usage);
+      setReport(r.report);
+      setRevisions(r.revisions);
+      setReviseText("");
+      setDay((d) => (d ? { ...d, report: { title: r.report.title, updatedAt: r.report.updatedAt } } : d));
+      setReportSave({ text: "저장됨", err: false });
+      setReviseStatus({ kind: "ok", text: "수정 요청을 반영해 저장했습니다." });
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "limit_reached") setUsage((u) => (u ? { ...u, reviseRemaining: 0 } : u));
+      setReviseStatus({ kind: "err", text: errorText(e) });
+    } finally {
+      setRevising(false);
     }
   }
 
@@ -312,7 +354,7 @@ export function Workspace({ profile }: { profile: Profile }) {
   const eduMaterials = day?.materials.filter((m) => m.kind === "education") ?? [];
   const schedMaterials = day?.materials.filter((m) => m.kind === "schedule") ?? [];
   const order = (ref: PhotoRef) => selected.findIndex((s) => sameRef(s, ref)) + 1;
-  const busy = generating || !day;
+  const busy = aiBusy || !day;
 
   return (
     <div className="page">
@@ -322,13 +364,17 @@ export function Workspace({ profile }: { profile: Profile }) {
             <h2>
               <span className="num">1</span>보고 일자
             </h2>
-            <input className="input" type="date" value={date} disabled={generating} onChange={(e) => changeDate(e.target.value)} />
+            <input className="input" type="date" value={date} disabled={aiBusy} onChange={(e) => changeDate(e.target.value)} />
             <div className="usage" style={{ marginTop: 10 }}>
               {usage && (
                 <>
                   오늘 남은 생성{" "}
                   <b>
                     {usage.generateRemaining}/{usage.generateLimit}회
+                  </b>
+                  {" · "}수정{" "}
+                  <b>
+                    {usage.reviseRemaining}/{usage.reviseLimit}회
                   </b>
                 </>
               )}
@@ -479,7 +525,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                 </div>
               </div>
 
-              <button type="button" className="btn btn-primary btn-block" disabled={generating || limitReached} onClick={startGenerate}>
+              <button type="button" className="btn btn-primary btn-block" disabled={aiBusy || limitReached} onClick={startGenerate}>
                 {generating ? <span className="spin" /> : null}
                 {generating ? "보고서 작성 중…" : report ? "다시 만들기" : "보고서 만들기"}
               </button>
@@ -503,7 +549,7 @@ export function Workspace({ profile }: { profile: Profile }) {
 
         <section>
           <div className="toolbar">
-            <button type="button" className="btn btn-primary" disabled={!report || generating} onClick={downloadWord}>
+            <button type="button" className="btn btn-primary" disabled={!report || aiBusy} onClick={downloadWord}>
               Word(.docx) 다운로드
             </button>
             <span className="spacer" />
@@ -521,11 +567,51 @@ export function Workspace({ profile }: { profile: Profile }) {
               </span>
             )}
           </div>
-          {report && !generating && <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>미리보기의 문장을 눌러 직접 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다.</p>}
+          {report && !aiBusy && <p className="hint" style={{ marginTop: -4, marginBottom: 10 }}>미리보기의 문장을 눌러 직접 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다.</p>}
+          {report && !generating && (
+            <div className="revise">
+              <h2>AI로 고치기</h2>
+              {revisions.length > 0 && (
+                <ol className="revise-log" aria-label="지난 수정 요청">
+                  {revisions.map((r, i) => (
+                    <li key={i}>{r.request}</li>
+                  ))}
+                </ol>
+              )}
+              <div className="revise-row">
+                <textarea
+                  className="textarea"
+                  rows={2}
+                  maxLength={1000}
+                  value={reviseText}
+                  disabled={revising || reviseLimitReached}
+                  placeholder="예) 시사점을 더 구체적으로, 성과에 ○○ 추가"
+                  aria-label="수정 요청"
+                  onChange={(e) => setReviseText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      revise();
+                    }
+                  }}
+                />
+                <button type="button" className="btn btn-primary" disabled={revising || reviseLimitReached || !reviseText.trim()} onClick={revise}>
+                  {revising ? <span className="spin" /> : null}
+                  {revising ? "고치는 중…" : "AI로 고치기"}
+                </button>
+              </div>
+              <div className="hint">
+                {reviseLimitReached
+                  ? "오늘 수정 요청 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다."
+                  : `요청한 부분만 고치고 직접 고친 문장은 그대로 둡니다. 지난 요청을 기억합니다 · 오늘 남은 수정 ${usage?.reviseRemaining ?? 0}/${usage?.reviseLimit ?? 0}회`}
+              </div>
+              {reviseStatus && <div className={`msg msg-${reviseStatus.kind}`}>{reviseStatus.text}</div>}
+            </div>
+          )}
           <div className="paper">
-            {generating && (
+            {aiBusy && (
               <div className="progress">
-                <b style={{ color: "var(--text-strong)" }}>보고서를 작성하고 있습니다</b>
+                <b style={{ color: "var(--text-strong)" }}>{revising ? "수정 요청을 반영하고 있습니다" : "보고서를 작성하고 있습니다"}</b>
                 <div className="bar">
                   <i style={{ width: `${Math.min(95, (elapsed / 150) * 100)}%` }} />
                 </div>
@@ -534,7 +620,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                 화면을 닫지 말고 기다려 주세요.
               </div>
             )}
-            {!report && !generating && (
+            {!report && !aiBusy && (
               <div className="empty">
                 <b>왼쪽 내용을 채우고 &lsquo;보고서 만들기&rsquo;를 누르세요</b>
                 기안문과 일정만 있어도 만들 수 있고, 교육자료가 있으면 세부 교육 내용이 풍부해집니다.
@@ -543,8 +629,8 @@ export function Workspace({ profile }: { profile: Profile }) {
             <div
               id="report"
               ref={reportEl}
-              hidden={!report || generating}
-              contentEditable={Boolean(report) && !generating}
+              hidden={!report || aiBusy}
+              contentEditable={Boolean(report) && !aiBusy}
               suppressContentEditableWarning
               onInput={() => {
                 reportDirty.current = true;
@@ -562,7 +648,7 @@ export function Workspace({ profile }: { profile: Profile }) {
           <div className="modal">
             <h3>보고서를 다시 만들까요?</h3>
             <p style={{ margin: 0 }}>
-              {fmtDate(date)} 보고서를 새로 만들면 <b>직접 고친 내용이 사라집니다</b>. 오늘 남은 생성 횟수가 1회 줄어듭니다.
+              {fmtDate(date)} 보고서를 새로 만들면 <b>직접 고친 내용{revisions.length > 0 ? "과 AI 수정 요청 기록이" : "이"} 사라집니다</b>. 오늘 남은 생성 횟수가 1회 줄어듭니다.
             </p>
             <div className="actions">
               <button type="button" className="btn" onClick={() => setConfirmOverwrite(false)}>
