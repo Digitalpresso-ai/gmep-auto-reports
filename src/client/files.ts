@@ -118,3 +118,13 @@ export async function unzip(file: File): Promise<File[]> {
   }
   return out;
 }
+
+/** 서버가 발급한 서명 업로드 URL로 원본을 Storage에 직접 올린다. storage-js uploadToSignedUrl과 같은 헤더를 쓴다. */
+export async function uploadOriginal(uploadUrl: string, file: File): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "content-type": file.type || "application/octet-stream", "cache-control": "max-age=3600", "x-upsert": "false" },
+    body: await file.arrayBuffer(),
+  }).catch(() => null);
+  if (!res?.ok) throw new Error(`${file.name}: 원본 파일을 보관하지 못했습니다${res ? `(${res.status})` : ""}`);
+}

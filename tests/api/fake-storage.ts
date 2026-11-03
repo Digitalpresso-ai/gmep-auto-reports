@@ -18,3 +18,11 @@ export async function signedUrls(paths: string[]): Promise<Map<string, string>> 
 export async function removeObjects(paths: string[]): Promise<void> {
   for (const p of paths) objects.delete(p);
 }
+
+export async function signedUploadUrl(path: string): Promise<string> {
+  return `https://storage.test/upload/${path}?token=t`;
+}
+
+export async function signedDownloadUrl(path: string, filename: string): Promise<string> {
+  return `https://storage.test/signed/${path}?download=${encodeURIComponent(filename)}`;
+}

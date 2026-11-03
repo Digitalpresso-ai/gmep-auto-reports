@@ -8,6 +8,7 @@ export type Profile = {
   businessIntro: string;
   proposalFilename: string | null;
   proposalChars: number;
+  proposalHasOriginal: boolean;
 };
 
 export type PhotoRef = { source: "shared" | "company"; id: string };

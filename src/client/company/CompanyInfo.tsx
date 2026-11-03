@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { api, errorText } from "../api";
-import { extractText } from "../files";
+import { extractText, uploadOriginal } from "../files";
 import type { Profile } from "./types";
 
 const MAX_INTRO = 5000;
@@ -10,7 +10,7 @@ const MAX_INTRO = 5000;
 export function CompanyInfo({ profile, onSaved, onCancel }: { profile: Profile; onSaved: () => void; onCancel?: () => void }) {
   const [traveler, setTraveler] = useState(profile.traveler);
   const [intro, setIntro] = useState(profile.businessIntro);
-  const [proposal, setProposal] = useState({ filename: profile.proposalFilename, chars: profile.proposalChars });
+  const [proposal, setProposal] = useState({ filename: profile.proposalFilename, chars: profile.proposalChars, original: profile.proposalHasOriginal });
   const [proposalText, setProposalText] = useState<string | null>(null);
   const [status, setStatus] = useState<{ kind: "err" | "info"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -20,10 +20,20 @@ export function CompanyInfo({ profile, onSaved, onCancel }: { profile: Profile; 
     setStatus({ kind: "info", text: `${file.name} 읽는 중…` });
     try {
       const text = await extractText(file);
-      await api("/api/company/proposal", { method: "PUT", body: { filename: file.name, text } });
-      setProposal({ filename: file.name, chars: text.length });
+      // 원본 보관이 실패해도 AI에 쓰는 텍스트는 저장한다
+      let storagePath: string | null = null;
+      let warning = "";
+      try {
+        const u = await api<{ storagePath: string; uploadUrl: string }>("/api/company/proposal/upload-url", { body: { filename: file.name, size: file.size } });
+        await uploadOriginal(u.uploadUrl, file);
+        storagePath = u.storagePath;
+      } catch (e) {
+        warning = `${errorText(e)} 텍스트는 저장했으므로 보고서는 만들 수 있습니다.`;
+      }
+      await api("/api/company/proposal", { method: "PUT", body: { filename: file.name, text, storagePath } });
+      setProposal({ filename: file.name, chars: text.length, original: storagePath !== null });
       setProposalText(text);
-      setStatus(null);
+      setStatus(warning ? { kind: "err", text: warning } : null);
     } catch (e) {
       setStatus({ kind: "err", text: errorText(e) });
     }
@@ -33,6 +43,15 @@ export function CompanyInfo({ profile, onSaved, onCancel }: { profile: Profile; 
     if (!open || proposalText !== null) return;
     try {
       setProposalText((await api<{ text: string }>("/api/company/proposal")).text);
+    } catch (e) {
+      setStatus({ kind: "err", text: errorText(e) });
+    }
+  }
+
+  async function downloadOriginal() {
+    try {
+      const { url } = await api<{ url: string }>("/api/company/proposal/file");
+      window.open(url, "_blank", "noopener");
     } catch (e) {
       setStatus({ kind: "err", text: errorText(e) });
     }
@@ -90,6 +109,11 @@ export function CompanyInfo({ profile, onSaved, onCancel }: { profile: Profile; 
               <div className="msg msg-ok">
                 {proposal.filename} · {proposal.chars.toLocaleString()}자 읽음 · 저장됨
               </div>
+              {proposal.original && (
+                <button type="button" className="btn-link" style={{ marginTop: 8 }} onClick={downloadOriginal}>
+                  원본 파일 내려받기
+                </button>
+              )}
               <details className="pv" onToggle={(e) => loadProposal((e.target as HTMLDetailsElement).open)}>
                 <summary>기안문 내용 보기</summary>
                 <pre>{proposalText ?? "불러오는 중…"}</pre>

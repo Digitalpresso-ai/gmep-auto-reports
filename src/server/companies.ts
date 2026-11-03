@@ -12,11 +12,13 @@ export type CompanyProfile = {
   businessIntro: string;
   proposalFilename: string | null;
   proposalChars: number;
+  proposalHasOriginal: boolean;
 };
 
 export async function getCompanyProfile(companyId: string): Promise<CompanyProfile> {
-  const [c] = await db()<{ id: string; name: string; traveler: string; business_intro: string; proposal_filename: string | null; proposal_chars: number }[]>`
-    select id, name, traveler, business_intro, proposal_filename, char_length(proposal_text) as proposal_chars
+  const [c] = await db()<{ id: string; name: string; traveler: string; business_intro: string; proposal_filename: string | null; proposal_chars: number; has_original: boolean }[]>`
+    select id, name, traveler, business_intro, proposal_filename, char_length(proposal_text) as proposal_chars,
+           (proposal_storage_path is not null) as has_original
     from companies where id = ${companyId}`;
   return {
     id: c.id,
@@ -26,6 +28,7 @@ export async function getCompanyProfile(companyId: string): Promise<CompanyProfi
     businessIntro: c.business_intro,
     proposalFilename: c.proposal_filename,
     proposalChars: c.proposal_chars,
+    proposalHasOriginal: c.has_original,
   };
 }
 
