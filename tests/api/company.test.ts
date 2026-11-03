@@ -131,6 +131,13 @@ describe("FUNC-17 입력 초안 자동 저장", () => {
     expect((await saveDraft(a.cookie, { selectedPhotos: [{ source: "shared", id: shared.id }] }, "2026-11-03")).status).toBe(400);
   });
 
+  it("30장을 넘게 고르면 장수 제한을 알려 준다", async () => {
+    const refs = Array.from({ length: 31 }, (_, i) => ({ source: "shared", id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}` }));
+    const res = await saveDraft(a.cookie, { selectedPhotos: refs });
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain("30장");
+  });
+
   it("관리자가 지운 공통 사진은 선택에서 빼고 돌려줘 그대로 다시 저장할 수 있다", async () => {
     const [gone] = await t.sql`insert into shared_files (report_date, kind, storage_path, filename, width, height)
       values (${date}, 'photo', 'shared/2026-11-02/gone.jpg', 'gone.jpg', 1100, 825) returning id`;
