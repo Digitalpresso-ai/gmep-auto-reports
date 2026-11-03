@@ -26,6 +26,7 @@ export function DayEditor({ date }: { date: string }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
+  const [describing, setDescribing] = useState(false);
   const ui = useDialog();
 
   const reload = useCallback(async () => {
@@ -117,10 +118,26 @@ export function DayEditor({ date }: { date: string }) {
     setProgress(null);
     setResult(r);
     await reload().catch(() => {});
-    if (r.counts.photo > 0) await describePhotos();
+    if (r.counts.photo > 0) await watchDescriptions();
   }
 
-  // 사진을 올린 뒤 설명이 없는 사진을 AI로 설명한다(PHOTO-1). 한 번 부를 때 몇 장씩 처리하므로 남은 것이 없거나 더 진행되지 않을 때까지 반복한다.
+  // 서버가 사진마다 업로드 응답 뒤 설명을 저장한다(PHOTO-1). 화면은 설명 수가 늘어나는 동안만 다시 불러와 보여 준다.
+  async function watchDescriptions() {
+    setDescribing(true);
+    let left = Infinity;
+    let stalled = 0;
+    while (stalled < 10) {
+      const d = await reload().catch(() => null);
+      const n = d?.files.filter((f) => f.kind === "photo" && f.description === null).length ?? 0;
+      if (n === 0) break;
+      stalled = n < left ? 0 : stalled + 1;
+      left = Math.min(left, n);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    setDescribing(false);
+  }
+
+  // 업로드 뒤 설명에 실패했거나 기능 이전에 올린 사진을 다시 설명한다(PHOTO-1). 한 번 부를 때 몇 장씩 처리하므로 남은 것이 없거나 더 진행되지 않을 때까지 반복한다.
   async function describePhotos() {
     setError("");
     try {
@@ -253,7 +270,8 @@ export function DayEditor({ date }: { date: string }) {
           <div className="field">
             <span>공통 사진 {photos.length}장{photos.length > 0 && ` · 설명 ${photos.length - undescribed}장`}</span>
             {drop("사진 추가", "image/*", "photo")}
-            {undescribed > 0 && !busy && (
+            {describing && undescribed > 0 && <div className="msg msg-info"><span className="spin" /> 사진 설명 저장 중 · 설명 없는 사진 {undescribed}장</div>}
+            {undescribed > 0 && !busy && !describing && (
               <div className="row" style={{ marginTop: 8 }}>
                 <button type="button" className="btn btn-small" onClick={describePhotos}>사진 설명 만들기 ({undescribed}장)</button>
                 <span className="hint">설명이 없는 사진은 보고서의 참여 사진 칸에만 들어갑니다</span>
