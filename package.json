@@ -14,7 +14,11 @@
     "db:migrate": "node db/migrate.ts",
     "check": "npm run lint && npm run typecheck && npm test",
     "test:api": "vitest run tests/api",
-    "admin:password": "node scripts/set-admin-password.ts"
+    "admin:password": "node scripts/set-admin-password.ts",
+    "db:local": "docker start gmep-local-db 2>/dev/null || docker run -d --name gmep-local-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=gmep -p 127.0.0.1:54329:5432 -v gmep-local-db:/var/lib/postgresql/data postgres:16",
+    "dev:local": "DATABASE_URL=postgresql://postgres:postgres@localhost:54329/gmep next dev",
+    "db:migrate:local": "MIGRATION_DATABASE_URL=postgresql://postgres:postgres@localhost:54329/gmep node db/migrate.ts",
+    "admin:password:local": "MIGRATION_DATABASE_URL=postgresql://postgres:postgres@localhost:54329/gmep node scripts/set-admin-password.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",
