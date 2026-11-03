@@ -17,8 +17,8 @@ afterAll(async () => {
 });
 
 describe("DATA-1 스키마", () => {
-  it("migration을 적용하고 두 번째 실행은 아무것도 적용하지 않는다", async () => {
-    expect(await migrate(sql)).toEqual(["0001_init.sql"]);
+  it("migration을 순서대로 적용하고 두 번째 실행은 아무것도 적용하지 않는다", async () => {
+    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql"]);
     expect(await migrate(sql)).toEqual([]);
   });
 
@@ -39,7 +39,68 @@ describe("DATA-1 스키마", () => {
     const rows = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class
       where relnamespace = 'public'::regnamespace and relkind = 'r' and relname <> 'schema_migrations'`;
-    expect(rows.length).toBe(7);
+    expect(rows.map((r) => r.relname).sort()).toEqual([
+      "admin_sessions", "admins", "ai_inflight", "ai_usage", "app_settings", "companies", "company_photos",
+      "drafts", "login_attempts", "reports", "sessions", "shared_days", "shared_files", "shared_materials",
+    ]);
     expect(rows.filter((r) => !r.relrowsecurity)).toEqual([]);
+  });
+});
+
+describe("COMP-1 초기 참가기업", () => {
+  it("19개사를 비밀번호 없이 넣는다", async () => {
+    const rows = await sql<{ name: string; password_hash: string | null }[]>`
+      select name, password_hash from companies where name not in ('A사', 'B사')`;
+    expect(rows).toHaveLength(19);
+    expect(rows.map((r) => r.name)).toContain("주식회사 디지털프레소");
+    expect(rows.every((r) => r.password_hash === null)).toBe(true);
+  });
+});
+
+describe("FUNC-1 회사 소개", () => {
+  it("5,000자까지 허용하고 넘으면 거부한다", async () => {
+    await sql`update companies set business_intro = ${"가".repeat(5000)} where name = 'A사'`;
+    await expect(sql`update companies set business_intro = ${"가".repeat(5001)} where name = 'A사'`).rejects.toThrow(/companies_business_intro_length/);
+  });
+});
+
+describe("SHARED-1 날짜별 공통 자료", () => {
+  it("공통 파일 종류는 일정 이미지·사진만, 공통 텍스트 종류는 일정·교육자료만 허용한다", async () => {
+    await sql`insert into shared_days (report_date) values ('2026-11-02')`;
+    await sql`insert into shared_files (report_date, kind, storage_path, filename, width, height) values ('2026-11-02', 'photo', 'shared/2026-11-02/a.jpg', 'a.jpg', 10, 10)`;
+    await expect(sql`insert into shared_files (report_date, kind, storage_path, filename, width, height) values ('2026-11-02', 'video', 'x', 'x', 1, 1)`).rejects.toThrow(/shared_files_kind_check/);
+    await sql`insert into shared_materials (report_date, kind, filename, text_content) values ('2026-11-02', 'education', 'a.pdf', '내용')`;
+    await expect(sql`insert into shared_materials (report_date, kind, filename, text_content) values ('2026-11-02', 'other', 'a.pdf', '내용')`).rejects.toThrow(/shared_materials_kind_check/);
+  });
+
+  it("공통 자료 날짜를 지우면 딸린 파일·텍스트도 지운다", async () => {
+    await sql`delete from shared_days where report_date = '2026-11-02'`;
+    expect((await sql`select 1 from shared_files where report_date = '2026-11-02'`).length).toBe(0);
+    expect((await sql`select 1 from shared_materials where report_date = '2026-11-02'`).length).toBe(0);
+  });
+});
+
+describe("FUNC-17 입력 초안", () => {
+  it("회사·날짜별로 하나만 두고, 일정 복사본은 아직 만들지 않았으면 null이다", async () => {
+    const [a] = await sql`select id from companies where name = 'A사'`;
+    await sql`insert into drafts (company_id, report_date) values (${a.id}, '2026-11-03')`;
+    const [d] = await sql`select schedule_text, selected_photos, notes from drafts where company_id = ${a.id}`;
+    expect(d).toEqual({ schedule_text: null, selected_photos: [], notes: "" });
+    await expect(sql`insert into drafts (company_id, report_date) values (${a.id}, '2026-11-03')`).rejects.toThrow(/drafts_pkey/);
+  });
+});
+
+describe("AUTH-12 관리자 계정", () => {
+  it("관리자 계정은 한 행만 둔다", async () => {
+    await sql`insert into admins (id, password_hash) values (1, 'h')`;
+    await expect(sql`insert into admins (id, password_hash) values (2, 'h')`).rejects.toThrow(/admins_id_check/);
+  });
+});
+
+describe("AI-9 동시 생성 방지", () => {
+  it("회사마다 진행 중인 생성은 하나만 기록한다", async () => {
+    const [a] = await sql`select id from companies where name = 'A사'`;
+    await sql`insert into ai_inflight (company_id) values (${a.id})`;
+    await expect(sql`insert into ai_inflight (company_id) values (${a.id})`).rejects.toThrow(/ai_inflight_pkey/);
   });
 });
