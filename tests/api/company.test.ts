@@ -131,11 +131,14 @@ describe("FUNC-17 입력 초안 자동 저장", () => {
     expect((await saveDraft(a.cookie, { selectedPhotos: [{ source: "shared", id: shared.id }] }, "2026-11-03")).status).toBe(400);
   });
 
-  it("30장을 넘게 고르면 장수 제한을 알려 준다", async () => {
-    const refs = Array.from({ length: 31 }, (_, i) => ({ source: "shared", id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}` }));
-    const res = await saveDraft(a.cookie, { selectedPhotos: refs });
-    expect(res.status).toBe(400);
-    expect((await res.json()).message).toContain("30장");
+  it("사진 장수에 제한 없이 그날 사진을 모두 고를 수 있다", async () => {
+    const many = "2026-11-06";
+    await t.sql`insert into shared_days (report_date) values (${many})`;
+    const rows = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height)
+      select ${many}, 'photo', 'shared/2026-11-06/p' || n || '.jpg', 'p' || n || '.jpg', 1100, 825 from generate_series(1, 40) n returning id`;
+    const refs = rows.map((r) => ({ source: "shared", id: r.id }));
+    expect((await saveDraft(a.cookie, { selectedPhotos: refs }, many)).status).toBe(200);
+    expect((await (await day(a.cookie, many)).json()).selectedPhotos).toHaveLength(40);
   });
 
   it("관리자가 지운 공통 사진은 선택에서 빼고 돌려줘 그대로 다시 저장할 수 있다", async () => {

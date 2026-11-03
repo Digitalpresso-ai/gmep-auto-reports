@@ -10,7 +10,6 @@ export type PhotoRef = { source: "shared" | "company"; id: string };
 export type PhotoView = PhotoRef & { filename: string; width: number; height: number; url: string };
 export type ResolvedPhoto = PhotoRef & { storagePath: string; width: number; height: number };
 
-export const MAX_SELECTED_PHOTOS = 30;
 export const MAX_NOTES_CHARS = 5_000;
 
 export type DayView = {

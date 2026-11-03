@@ -2,10 +2,10 @@ import { requireCompany } from "@/server/auth";
 import { isIsoDate } from "@/server/domain/dates";
 import { badRequest, isUuid, ok, readJson } from "@/server/http";
 import { MAX_SCHEDULE_CHARS } from "@/server/shared-days";
-import { MAX_NOTES_CHARS, MAX_SELECTED_PHOTOS, resolvePhotos, saveDraft, type DraftPatch, type PhotoRef } from "@/server/workspace";
+import { MAX_NOTES_CHARS, resolvePhotos, saveDraft, type DraftPatch, type PhotoRef } from "@/server/workspace";
 
 function parseRefs(v: unknown): PhotoRef[] | null {
-  if (!Array.isArray(v) || v.length > MAX_SELECTED_PHOTOS) return null;
+  if (!Array.isArray(v)) return null;
   const refs: PhotoRef[] = [];
   const seen = new Set<string>();
   for (const x of v) {
@@ -35,8 +35,6 @@ export async function PUT(req: Request, ctx: RouteContext<"/api/days/[date]/draf
     patch.notes = body.notes;
   }
   if (body.selectedPhotos !== undefined) {
-    if (Array.isArray(body.selectedPhotos) && body.selectedPhotos.length > MAX_SELECTED_PHOTOS)
-      return badRequest(`사진은 ${MAX_SELECTED_PHOTOS}장까지 고를 수 있습니다`);
     const refs = parseRefs(body.selectedPhotos);
     if (!refs || !(await resolvePhotos(s.companyId, date, refs))) return badRequest("고를 수 없는 사진이 있습니다");
     patch.selectedPhotos = refs;

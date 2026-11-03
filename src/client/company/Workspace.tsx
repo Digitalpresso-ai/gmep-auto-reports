@@ -10,7 +10,6 @@ type DraftPatch = { scheduleText?: string; selectedPhotos?: PhotoRef[]; notes?: 
 type Status = { kind: "err" | "ok" | "info" | "warn"; text: string; retry?: boolean } | null;
 
 const AUTO_SELECT_MAX = 4;
-const MAX_SELECTED = 30;
 const sameRef = (a: PhotoRef, b: PhotoRef) => a.source === b.source && a.id === b.id;
 
 // H0 작성 화면 → E1/E2 입력 → G1 생성 중 / G2 실패 / Q1 한도 소진 → R1 미리보기·편집 / R2 저장 실패 → W1 Word
@@ -202,17 +201,13 @@ export function Workspace({ profile }: { profile: Profile }) {
 
   // ---------- 사진(FUNC-6, SHARED-3) ----------
   function toggle(ref: PhotoRef) {
-    const on = selected.some((s) => sameRef(s, ref));
-    if (!on && selected.length >= MAX_SELECTED) return setStatus({ kind: "warn", text: `사진은 ${MAX_SELECTED}장까지 고를 수 있습니다.` });
-    const next = on ? selected.filter((s) => !sameRef(s, ref)) : [...selected, ref];
+    const next = selected.some((s) => sameRef(s, ref)) ? selected.filter((s) => !sameRef(s, ref)) : [...selected, ref];
     setSelected(next);
     queueDraft({ selectedPhotos: next }, 400);
   }
 
   function selectAll(on: boolean) {
-    const all = on ? [...selected, ...(day?.photos ?? []).filter((p) => !selected.some((s) => sameRef(s, p))).map(({ source, id }) => ({ source, id }))] : [];
-    const next = all.slice(0, MAX_SELECTED);
-    if (all.length > next.length) setStatus({ kind: "warn", text: `사진은 ${MAX_SELECTED}장까지 고를 수 있어 앞의 ${MAX_SELECTED}장만 골랐습니다.` });
+    const next = on ? [...selected, ...(day?.photos ?? []).filter((p) => !selected.some((s) => sameRef(s, p))).map(({ source, id }) => ({ source, id }))] : [];
     setSelected(next);
     queueDraft({ selectedPhotos: next }, 400);
   }
@@ -237,7 +232,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       await flushDraft();
       const v = await api<DayView>(`/api/days/${date}`);
       setDay(v);
-      const next = v.photos.length <= AUTO_SELECT_MAX ? [...selected, ...added].slice(0, MAX_SELECTED) : selected;
+      const next = v.photos.length <= AUTO_SELECT_MAX ? [...selected, ...added] : selected;
       if (next !== selected) {
         setSelected(next);
         queueDraft({ selectedPhotos: next }, 0);
