@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
 import { ApiError, api, errorText, fmtDate, kstToday } from "../api";
+import { useDialog } from "../dialog";
 import { imageForm, toJpeg } from "../files";
 import type { DayView, PhotoRef, Profile, ReportDoc, Usage } from "./types";
 
@@ -16,6 +17,7 @@ export function Workspace({ profile }: { profile: Profile }) {
   const [date, setDate] = useState(kstToday);
   const [day, setDay] = useState<DayView | null>(null);
   const [loadError, setLoadError] = useState("");
+  const ui = useDialog();
   const [schedule, setSchedule] = useState("");
   const [notes, setNotes] = useState("");
   const [selected, setSelected] = useState<PhotoRef[]>([]);
@@ -229,7 +231,7 @@ export function Workspace({ profile }: { profile: Profile }) {
   }
 
   async function removePhoto(id: string) {
-    if (!confirm("이 사진을 지울까요?")) return;
+    if (!(await ui.confirm("이 사진을 지울까요?", "삭제"))) return;
     try {
       await flushDraft();
       await api(`/api/days/${date}/photos/${id}`, { method: "DELETE" });
@@ -559,6 +561,7 @@ export function Workspace({ profile }: { profile: Profile }) {
           </div>
         </div>
       )}
+      {ui.dialog}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { classifyFile, extOf, type FileKind } from "@/lib/classify";
 import { api, errorText, fmtDate } from "../api";
+import { useDialog } from "../dialog";
 import { extractText, imageForm, toJpeg, unzip, uploadOriginal } from "../files";
 
 type SharedDay = {
@@ -25,6 +26,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
   const [progress, setProgress] = useState<Progress | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
+  const ui = useDialog();
 
   const reload = useCallback(async () => {
     const d = await api<SharedDay>(`/api/admin/days/${date}`);
@@ -151,7 +153,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
   }
 
   async function remove(path: string) {
-    if (!confirm("지울까요? 이미 고른 회사 보고서에서는 빠지지 않습니다.")) return;
+    if (!(await ui.confirm("지울까요? 이미 고른 회사 보고서에서는 빠지지 않습니다.", "삭제"))) return;
     try {
       await api(path, { method: "DELETE" });
       await reload();
@@ -272,6 +274,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
           </div>
         </div>
       </div>
+      {ui.dialog}
     </div>
   );
 }

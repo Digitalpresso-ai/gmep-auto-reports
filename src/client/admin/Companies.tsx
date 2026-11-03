@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
+import { useDialog } from "../dialog";
 
 type Row = { id: string; name: string; label: string; hasPassword: boolean; mustChangePassword: boolean; lockedUntil: string | null };
 
@@ -11,8 +12,7 @@ export function Companies() {
   const [error, setError] = useState("");
   const [issued, setIssued] = useState<{ label: string; password: string } | null>(null);
   const [bulk, setBulk] = useState<{ name: string; label: string; password: string }[] | null>(null);
-  // 앱 내장 브라우저 등 window.confirm을 바로 취소로 돌려주는 환경이 있어 확인은 페이지 안 창으로 받는다
-  const [ask, setAsk] = useState<{ text: string; run: () => void } | null>(null);
+  const ui = useDialog();
 
   const reload = useCallback(() => api<Row[]>("/api/admin/companies").then(setRows, (e) => setError(errorText(e))), []);
   useEffect(() => {
@@ -32,7 +32,7 @@ export function Companies() {
   }
 
   async function rename(r: Row) {
-    const next = prompt("새 회사명(운영사 명단과 같게)", r.name)?.trim();
+    const next = (await ui.prompt("새 회사명(운영사 명단과 같게)", r.name))?.trim();
     if (!next || next === r.name) return;
     try {
       await api(`/api/admin/companies/${r.id}`, { method: "PATCH", body: { name: next } });
@@ -42,12 +42,8 @@ export function Companies() {
     }
   }
 
-  function issue(r: Row) {
-    if (r.hasPassword) setAsk({ text: `${r.label}의 비밀번호를 새로 발급할까요? 지금 쓰는 비밀번호와 로그인이 모두 끊어집니다.`, run: () => doIssue(r) });
-    else doIssue(r);
-  }
-
-  async function doIssue(r: Row) {
+  async function issue(r: Row) {
+    if (r.hasPassword && !(await ui.confirm(`${r.label}의 비밀번호를 새로 발급할까요? 지금 쓰는 비밀번호와 로그인이 모두 끊어집니다.`, "발급"))) return;
     try {
       const { password } = await api<{ password: string }>(`/api/admin/companies/${r.id}/password`, { method: "POST" });
       setIssued({ label: r.label, password });
@@ -58,6 +54,7 @@ export function Companies() {
   }
 
   async function issueMissing() {
+    if (!(await ui.confirm(`비밀번호가 없는 ${missing}개사에 초기 비밀번호를 발급할까요? 이미 비밀번호가 있는 회사는 그대로 둡니다.`, "발급"))) return;
     setError("");
     try {
       const res = await api<{ issued: { name: string; label: string; password: string }[] }>("/api/admin/companies/passwords", { method: "POST" });
@@ -94,7 +91,7 @@ export function Companies() {
         <button className="btn btn-primary" disabled={!name.trim()}>회사 추가</button>
       </form>
       <div className="row" style={{ marginTop: 8 }}>
-        <button type="button" className="btn btn-small" disabled={!missing} onClick={() => setAsk({ text: `비밀번호가 없는 ${missing}개사에 초기 비밀번호를 발급할까요? 이미 비밀번호가 있는 회사는 그대로 둡니다.`, run: issueMissing })}>
+        <button type="button" className="btn btn-small" disabled={!missing} onClick={issueMissing}>
           비밀번호 미발급 {missing}개사 일괄 발급
         </button>
       </div>
@@ -134,18 +131,7 @@ export function Companies() {
           </div>
         </div>
       )}
-      {ask && (
-        <div className="modal-veil" role="dialog" aria-modal="true">
-          <div className="modal">
-            <h3>확인</h3>
-            <p style={{ margin: 0 }}>{ask.text}</p>
-            <div className="actions">
-              <button type="button" className="btn" onClick={() => setAsk(null)}>취소</button>
-              <button type="button" className="btn btn-primary" onClick={() => (ask.run(), setAsk(null))}>발급</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {ui.dialog}
       {bulk && (
         <div className="modal-veil" role="dialog" aria-modal="true">
           <div className="modal">
