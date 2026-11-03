@@ -10,6 +10,7 @@ export function Companies() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [issued, setIssued] = useState<{ label: string; password: string } | null>(null);
+  const [bulk, setBulk] = useState<{ name: string; label: string; password: string }[] | null>(null);
 
   const reload = useCallback(() => api<Row[]>("/api/admin/companies").then(setRows, (e) => setError(errorText(e))), []);
   useEffect(() => {
@@ -50,6 +51,34 @@ export function Companies() {
     }
   }
 
+  async function issueMissing() {
+    const n = rows?.filter((r) => !r.hasPassword).length ?? 0;
+    if (!confirm(`비밀번호가 없는 ${n}개사에 초기 비밀번호를 발급할까요? 이미 비밀번호가 있는 회사는 그대로 둡니다.`)) return;
+    setError("");
+    try {
+      const res = await api<{ issued: { name: string; label: string; password: string }[] }>("/api/admin/companies/passwords", { method: "POST" });
+      setBulk(res.issued);
+      await reload();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }
+
+  const bulkText = (list: NonNullable<typeof bulk>) => list.map((b) => `${b.label}\t${b.password}`).join("\n");
+
+  // 엑셀에서 한글이 깨지지 않도록 BOM을 붙인다. 파일은 브라우저에서만 만든다.
+  function downloadCsv(list: NonNullable<typeof bulk>) {
+    const quote = (v: string) => `"${v.replaceAll('"', '""')}"`;
+    const csv = ["로그인 표시명,등록 이름,초기 비밀번호", ...list.map((b) => [b.label, b.name, b.password].map(quote).join(","))].join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }));
+    a.download = "초기비밀번호.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const missing = rows?.filter((r) => !r.hasPassword).length ?? 0;
+
   const state = (r: Row) =>
     r.lockedUntil ? <span className="chip" style={{ color: "var(--dp-danger)" }}>잠김</span> : !r.hasPassword ? <span className="chip chip-muted">비밀번호 미발급</span> : r.mustChangePassword ? <span className="chip">최초 변경 전</span> : <span className="chip" style={{ color: "var(--dp-success)" }}>사용 중</span>;
 
@@ -60,6 +89,11 @@ export function Companies() {
         <input className="input" style={{ flex: 1, minWidth: 200 }} placeholder="추가할 회사명 (예: 주식회사 ○○○)" value={name} onChange={(e) => setName(e.target.value)} />
         <button className="btn btn-primary" disabled={!name.trim()}>회사 추가</button>
       </form>
+      <div className="row" style={{ marginTop: 8 }}>
+        <button type="button" className="btn btn-small" disabled={!missing} onClick={issueMissing}>
+          비밀번호 미발급 {missing}개사 일괄 발급
+        </button>
+      </div>
       {error && <div className="msg msg-err">{error}</div>}
       <div className="table-wrap" style={{ marginTop: 16 }}>
         <table className="table table-stack">
@@ -92,6 +126,31 @@ export function Companies() {
             <div className="actions">
               <button type="button" className="btn" onClick={() => navigator.clipboard?.writeText(issued.password)}>복사</button>
               <button type="button" className="btn btn-primary" onClick={() => setIssued(null)}>전달했습니다</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bulk && (
+        <div className="modal-veil" role="dialog" aria-modal="true">
+          <div className="modal">
+            <h3>초기 비밀번호 {bulk.length}개사</h3>
+            <p style={{ margin: "0 0 12px" }}>이 창을 닫으면 다시 볼 수 없습니다. 복사하거나 내려받아 각 회사에 전달해 주세요.</p>
+            {bulk.length ? (
+              <ul className="files issued-list">
+                {bulk.map((b) => (
+                  <li key={b.label}>
+                    <b>{b.label}</b>
+                    <span className="secret">{b.password}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="hint">발급할 회사가 없습니다.</p>
+            )}
+            <div className="actions">
+              {bulk.length > 0 && <button type="button" className="btn" onClick={() => navigator.clipboard?.writeText(bulkText(bulk))}>전체 복사</button>}
+              {bulk.length > 0 && <button type="button" className="btn" onClick={() => downloadCsv(bulk)}>CSV 내려받기</button>}
+              <button type="button" className="btn btn-primary" onClick={() => setBulk(null)}>전달했습니다</button>
             </div>
           </div>
         </div>

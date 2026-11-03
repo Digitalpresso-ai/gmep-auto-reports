@@ -272,3 +272,5 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
   .table-stack td.actions-cell .btn { flex: 1; }
 }
 .drive-link { margin-bottom: 10px; }
+.issued-list { max-height: 50vh; overflow-y: auto; }
+.issued-list .secret { font-size: 15px; padding: 4px 8px; }
