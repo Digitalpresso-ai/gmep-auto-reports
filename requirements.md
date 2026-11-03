@@ -34,7 +34,7 @@
 | FUNC-7 | 특이사항(별도 성과·별도 미팅) 자유 입력 → 보고서의 별도 섹션 | p.2 §3 | 1차 | `src/server/workspace.ts`, `src/server/domain/prompt.ts` / `tests/api/report.test.ts` | 검증됨 |
 | FUNC-8 | 보고서 생성: AI 호출 → JSON → 미리보기. 항목: 기본정보, 일정·수행내용, 세부 교육내용, 주요 성과, 특이사항, 시사점·향후계획, 참여 사진, 첨부 | p.2 §3 | 1차 | `src/server/generate.ts`, `src/server/domain/report.ts` / `tests/api/report.test.ts`, `tests/domain/report.test.ts` | 검증됨(가짜 AI 응답). 실제 AI 호출 미검증 |
 | FUNC-9 | 미리보기 문장 직접 수정(contenteditable), 자동 저장 | p.2 §3 | 1차 | `src/server/sanitize.ts`, `PUT /api/days/[date]/report` / `tests/api/report.test.ts` | 검증됨 |
-| FUNC-10 | 수정 요청 입력 → AI 재작성. 사용자가 직접 고친 내용은 유지 | p.2 §3 | 2차 | — | 미구현 |
+| FUNC-10 | 수정 요청 입력 → AI 재작성. 사용자가 직접 고친 내용은 유지. 지난 수정 요청을 모두 기억해 이어서 해석(예: "아까 바꾼 부분"). 다시 만들면 수정 기록을 지움 | p.2 §3, 2026-11-04 사용자 요청("대화 내용을 다 기억해야 함") | 2차 | `db/migrations/0006_report_revisions.sql`, `src/server/domain/prompt.ts` buildRevisionFollowUp, `src/server/generate.ts` reviseReport, `/api/days/[date]/report/revisions`, `Workspace.tsx` / `tests/api/report.test.ts`, `tests/db/migration.test.ts` | 검증됨(API, 가짜 AI). 화면은 로컬 브라우저에서 목록·한도 소진·거부 메시지만 확인. 실제 AI의 수정 품질(요청 외 부분 유지·직접 고친 문장 유지)은 미검증. 보고서 JSON으로 다시 받으므로 스키마 밖 서식(직접 넣은 문단 등)은 항목으로 바뀔 수 있음 |
 | FUNC-11 | 일일 보고서 .docx 다운로드(사진 포함). 맑은 고딕, A4, □ · - 개조식 불릿. Word·한글(HWP 뷰어)에서 깨짐 없이 열림 | p.2 §3, p.5 §6-2 | 1차 | `src/server/docx.ts`, `src/app/api/days/[date]/report/docx` / `tests/api/docx.test.ts` | 구현 중(검사 통과, LibreOffice로 열림 확인. Word·한글 실기 미검증) |
 | FUNC-12 | 보관함: 날짜별 보고서 카드, 다시 열기, 확인 후 삭제. 같은 날짜 재생성 시 덮어쓰기 | p.2 §3 | 2차 | — | 미구현 |
 | FUNC-13 | 전체 합본: 저장된 일일 보고서를 날짜순으로 .docx 한 파일에 합침 | p.3 §3 | 2차 | — | 미구현 |
@@ -70,16 +70,17 @@
 | PHOTO-2 | 생성 때 고른 사진의 번호·설명을 보내고 AI가 사진마다 자리(일정 표 아래 / N번째 교육 세션 / 참여 사진)를 고름. 미리보기·Word는 그 자리에 고른 사진만 2열로 넣고, 남은 사진은 참여 사진에 넣음. 모두 배치되면 참여 사진 제목을 숨김. 사진 설명은 본문에 쓰지 않음(FUNC-14). 첨부는 번호 없는 '붙임'으로 맨 끝 | 2026-11-03 사용자 요청("사진을 어디에 넣어야 할지") | 1차 | `src/lib/photo-layout.ts`, `src/server/domain/report.ts`, `src/server/docx.ts`, `Workspace.tsx`, `src/server/sanitize.ts` / `tests/domain/photo-layout.test.ts`, `tests/domain/report.test.ts`, `tests/domain/sanitize.test.ts`, `tests/api/docx.test.ts`, `tests/api/report.test.ts` | 검증됨(배치 규칙·Word). 미리보기는 브라우저 미확인. 실제 자료 채점 사진 배치 1→평균 4.8/5 |
 | AI-7 | 1~2분 응답 대비 스트리밍 또는 진행 표시, 서버 타임아웃 3분 이상 | p.3 §4-1 | 1차 | `maxDuration = 300`, `src/server/ai.ts` 280초, `Workspace.tsx` 진행 표시 | 미검증(실제 응답 시간 미측정) |
 | AI-8 | 요청 1건 상한: 교육자료 텍스트 합계 45,000자, 기안문 15,000자에서 자름. max_tokens 8,000 | p.3 §4-2 ① | 1차 | `src/server/domain/prompt.ts`, `src/server/ai.ts`(max_tokens 8,000) / `tests/domain/report.test.ts` | 검증됨(자르기). max_tokens는 코드 확인만 |
-| AI-9 | 회사별 1일 한도: 생성 5회, 수정 요청 15회(관리자 조정 가능). 화면에 "오늘 남은 생성 3/5회" 표시. 실패한 AI 호출은 횟수에서 차감하지 않음(usage는 AI-12대로 기록) | p.3 §4-2 ②, 2026-11-03 사용자 답변("차감 안 함") | 1차(생성 한도)·2차(조정) | `src/server/usage.ts`, `src/server/generate.ts`(ai_inflight) / `tests/api/report.test.ts` | 검증됨(생성 한도·실패 미차감·동시 생성 거부). 수정 15회는 2차 |
+| AI-9 | 회사별 1일 한도: 생성 5회, 수정 요청 15회(관리자 조정 가능). 화면에 "오늘 남은 생성 3/5회" 표시. 실패한 AI 호출은 횟수에서 차감하지 않음(usage는 AI-12대로 기록) | p.3 §4-2 ②, 2026-11-03 사용자 답변("차감 안 함") | 1차(생성 한도)·2차(조정) | `src/server/usage.ts`, `src/server/generate.ts`(ai_inflight) / `tests/api/report.test.ts` | 검증됨(생성·수정 한도, 실패 미차감, 생성·수정 동시 실행 거부). 관리자 조정은 2차 |
 | AI-10 | 회사별 월 토큰 한도(입력+출력). 초과 시 AI 버튼 비활성 + "오늘 사용 한도를 다 쓰셨습니다". 직접 편집·Word 다운로드는 계속 가능 | p.3 §4-2 ② | 1차 | `src/server/domain/usage.ts` / `tests/api/report.test.ts` | 검증됨(한도값은 회사별 monthly_token_limit, 기본 없음) |
 | AI-11 | 앱 내부 전체 월 토큰 예산, 80% 도달 시 관리자 메일 알림. 예산 금액은 Anthropic Console 워크스페이스 한도와 같게 둠(D1) | p.4 §4-2 ③, 2026-11-03 사용자 답변 | 2차 | — | 미구현 |
 | AI-12 | 호출마다 usage(입력·출력 토큰)를 회사·일시·종류(생성/수정)·모델·성공 여부와 저장 → 관리자 화면에 회사별·일별 표 | p.4 §4-2, p.4 §5-1 | 1차(기록)·2차(화면) | `src/server/usage.ts` recordUsage / `tests/api/report.test.ts` | 검증됨(기록). 관리자 표는 2차 |
+| AI-13 | 프롬프트 캐싱: 생성 요청의 일정 이미지·자료·규칙 블록을 1시간 캐시하고, AI 수정(FUNC-10)은 같은 블록 뒤에 요청을 붙여 캐시를 읽음. 캐시 읽기·쓰기 토큰을 ai_usage에 따로 기록. 사진 설명(PHOTO-1)은 공통 지시문이 캐시 최소 길이(512토큰)보다 짧아 적용하지 않음 | 2026-11-04 사용자 요청 | 1차 | `src/server/ai.ts` userContent, `src/server/generate.ts`, `db/migrations/0007_usage_cache_tokens.sql` / `tests/domain/ai-request.test.ts`, `tests/api/report.test.ts` | 검증됨(요청 블록 구성·기록, 가짜 AI). 실제 API에서 cache_read_input_tokens가 0보다 큰지는 미검증 |
 
 ## 저장·배포·보안
 
 | ID | 조건·기대 결과 | 근거 | 단계 | 구현·검사 위치 | 상태 |
 |---|---|---|---|---|---|
-| DATA-1 | 테이블 예시: companies, reports(회사별 날짜 유일), report_photos, ai_usage, login_attempts | p.4 §5-1 | 1차 | `db/migrations/0001~0004` / `tests/db/migration.test.ts` | 검증됨 |
+| DATA-1 | 테이블 예시: companies, reports(회사별 날짜 유일), report_photos, ai_usage, login_attempts | p.4 §5-1 | 1차 | `db/migrations/0001~0007` / `tests/db/migration.test.ts` | 검증됨 |
 | DATA-2 | 사진은 객체 저장소, 회사별 폴더 분리, 서명 URL로만 제공 | p.4 §5-1 | 1차 | `src/server/storage.ts`, `src/server/photos.ts` / `tests/api/company.test.ts`(가짜 저장소) | 구현 중(회사별 경로·서명 URL 코드. 실제 Supabase 미검증) |
 | DATA-3 | 보관 기한은 프로그램 종료일부터 1개월로 고정. 로그인 화면에 안내 문구 표시, 기한 후 일괄 삭제. 종료일 기본값 2026-11-30(11월 마지막 날) → 보관 기한 2026-12-30. 종료일 값은 코드에 고정하지 않고 설정으로 바꿀 수 있게 함 | p.5 §5-3, 2026-11-03 사용자 답변("프로그램 종료일부터 한달로 고정", "11월 마지막일") | 1차(문구)·종료(삭제) | `src/server/settings.ts`, `GET /api/notice`, `Login.tsx` / `tests/api/company.test.ts`, `tests/domain/dates.test.ts` | 구현 중(안내 문구·종료일 설정 검증됨. 일괄 삭제는 종료 시) |
 | OPS-1 | Vercel Hobby 배포, HTTPS. 주소는 Vercel 기본 도메인 https://gmep-auto-reports.vercel.app/. 코드는 도메인을 쓰지 않고 상대 경로만 사용하므로 도메인을 바꿔도 코드 수정이 필요 없음 | p.4 §5-2, 2026-11-03 사용자 답변("그냥 기본 도메인으로") | 1차 | `vercel.json` / 배포 주소에서 로그인 화면·회사 목록 API 확인(2026-11-03) | 검증됨(배포 접속) |
