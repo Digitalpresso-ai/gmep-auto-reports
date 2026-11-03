@@ -101,7 +101,7 @@ describe("SHARED-2·3 작성 화면 데이터", () => {
 
   it("공통 자료가 없는 날도 빈 입력으로 연다(SHARED-4)", async () => {
     const body = await (await day(a.cookie, "2026-11-05")).json();
-    expect(body).toMatchObject({ hasShared: false, schedule: { text: "", edited: false }, photos: [], materials: [] });
+    expect(body).toMatchObject({ hasShared: false, draftSaved: false, schedule: { text: "", edited: false }, photos: [], materials: [] });
   });
 
   it("회사가 고친 일정 복사본은 이후 공통 일정이 바뀌어도 유지하고, 다른 회사에는 영향이 없다", async () => {
@@ -120,6 +120,7 @@ describe("FUNC-17 입력 초안 자동 저장", () => {
     const body = await (await day(a.cookie)).json();
     expect(body.selectedPhotos).toEqual([{ source: "shared", id: shared.id }]);
     expect(body.notes).toBe("CTO 미팅");
+    expect(body.draftSaved).toBe(true);
     expect(body.schedule.edited).toBe(true);
   });
 

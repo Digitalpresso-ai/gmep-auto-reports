@@ -16,6 +16,8 @@ export const MAX_NOTES_CHARS = 5_000;
 export type DayView = {
   date: string;
   hasShared: boolean;
+  // 한 번도 저장하지 않은 초안이면 브라우저가 후보 4장 이하를 자동 선택한다(FUNC-6)
+  draftSaved: boolean;
   schedule: { text: string; edited: boolean };
   scheduleImages: { id: string; url: string; filename: string }[];
   materials: { kind: "schedule" | "education"; filename: string; chars: number }[];
@@ -48,6 +50,7 @@ export async function getDayView(companyId: string, date: string): Promise<DayVi
   return {
     date,
     hasShared: shared !== null,
+    draftSaved: draft !== null,
     schedule: draft?.schedule_text != null ? { text: draft.schedule_text, edited: true } : { text: shared?.scheduleText ?? "", edited: false },
     scheduleImages: (shared?.files ?? []).filter((f) => f.kind === "schedule_image").map((f) => ({ id: f.id, url: f.url, filename: f.filename })),
     materials: (shared?.materials ?? []).map((m) => ({ kind: m.kind, filename: m.filename, chars: m.chars })),
