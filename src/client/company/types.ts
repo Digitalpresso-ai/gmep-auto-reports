@@ -13,7 +13,15 @@ export type Profile = {
 
 export type PhotoRef = { source: "shared" | "company"; id: string };
 export type PhotoView = PhotoRef & { filename: string; width: number; height: number; url: string };
-export type Usage = { generateUsed: number; generateLimit: number; generateRemaining: number; tokenLimitReached: boolean };
+export type Usage = {
+  generateUsed: number;
+  generateLimit: number;
+  generateRemaining: number;
+  reviseUsed: number;
+  reviseLimit: number;
+  reviseRemaining: number;
+  tokenLimitReached: boolean;
+};
 
 export type DayView = {
   date: string;

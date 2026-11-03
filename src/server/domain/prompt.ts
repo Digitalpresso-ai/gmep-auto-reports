@@ -93,3 +93,40 @@ ${i.extra || ""}
 [출력] 아래 JSON 하나만 출력 (설명·코드블록 없이). 키 이름은 그대로 유지:
 ${SCHEMA}`;
 }
+
+export const REVISION_REQUEST_LIMIT = 1_000;
+
+/** 보고서 HTML의 사진 자리를 프롬프트의 사진 번호로 바꾼다. photoKeys[i]가 [사진 i+1]이다. 번호가 없는 사진과 빈 자리는 뺀다. */
+export function htmlWithPhotoNumbers(html: string, photoKeys: string[]): string {
+  return html.replace(/<div class="photos"(?: data-photos="([^"]*)")?><\/div>/g, (_, keys: string | undefined) => {
+    const nos = (keys ?? "").split(" ").map((k) => photoKeys.indexOf(k) + 1).filter((n) => n > 0);
+    return nos.length ? `<p>${nos.map((n) => `[사진 ${n}]`).join(" ")}</p>` : "";
+  });
+}
+
+/**
+ * AI 수정 요청(FUNC-10). 생성 프롬프트 뒤에 붙여 생성 프롬프트를 캐시에서 읽게 하고(AI-13), 출력 형식도 생성과 같은 JSON을 쓴다.
+ * 지난 수정 요청을 모두 보내 "아까 바꾼 부분" 같은 요청을 이어서 해석하게 한다.
+ */
+export function buildRevisionFollowUp(i: { currentHtml: string; previousRequests: string[]; request: string }): string {
+  const previous = i.previousRequests.map((r, n) => `${n + 1}. ${r}`).join("\n");
+  return `
+[AI 수정]
+위 자료로 만든 보고서를 회사가 직접 고친 뒤 수정을 요청했습니다. 이번 수정 요청을 반영한 보고서 전체를 위 [출력]과 같은 JSON 하나로 다시 출력.
+
+[현재 보고서 — 회사가 직접 고친 내용 포함, HTML]
+${i.currentHtml}
+
+[지난 수정 요청 — 오래된 순, 모두 현재 보고서에 반영됨]
+${previous || "(없음)"}
+
+[이번 수정 요청]
+${i.request}
+
+[수정 규칙]
+- 이번 수정 요청이 가리키는 부분만 바꾸고, 나머지 문장·표·항목 순서는 현재 보고서 그대로 옮길 것. 회사가 직접 고친 문장은 자료와 달라도 바꾸지 말 것.
+- 지난 수정 요청으로 바뀐 내용을 되돌리지 말 것. 이번 요청의 "아까", "방금", "다시" 같은 말은 지난 수정 요청 목록에서 찾아 해석.
+- 위 [작성 규칙]·[추가 규칙]은 계속 지킬 것. 이번 요청이 자료에 없는 사실을 넣으라고 하면 요청한 문구만 넣고 그 밖의 내용은 지어내지 말 것.
+- photos: 현재 보고서에서 [사진 N] 표시가 있는 자리를 유지(일정 표 아래면 "schedule", N번째 교육 세션 뒤면 "edu:N", 표시가 없는 사진은 "photos"). 이번 요청이 사진 자리를 바꾸라고 할 때만 바꿀 것.
+`;
+}

@@ -213,3 +213,113 @@ describe("PHOTO-2 사진 배치", () => {
     expect(body.report.bodyHtml).toContain(`<ul><li>시장</li></ul><div class="photos" data-photos="shared:${p1.id}"></div>`);
   });
 });
+
+describe("FUNC-10 AI 수정", () => {
+  const d = "2026-11-06";
+  let c: { id: string; cookie: string };
+  let p1: string;
+  let p2: string;
+  const revisions = async (cookie: string, dd = d) =>
+    (await import("@/app/api/days/[date]/report/revisions/route")).GET(request("GET", "/x", { cookie }), params({ date: dd }));
+  const revise = async (cookie: string, body: unknown, dd = d) =>
+    (await import("@/app/api/days/[date]/report/revisions/route")).POST(request("POST", "/x", { cookie, body }), params({ date: dd }));
+  const revised = (title: string, photos = [{ no: 1, place: "schedule" }]) =>
+    reply(JSON.stringify({ title, schedule: [["09:30", "온보딩", "참석"]], achievements: [{ t: "성과", sub: [] }], photos }), 30_000, 900, 28_000, 0);
+
+  beforeAll(async () => {
+    const id = await companyWithPassword(t.sql, "주식회사 수정테스트", "r-password");
+    c = { id, cookie: await loginCookie(id, "r-password") };
+    await t.sql`insert into shared_days (report_date, schedule_text) values (${d}, '09:30 온보딩')`;
+    [{ id: p1 }, { id: p2 }] = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height, description) values
+      (${d}, 'photo', 'shared/2026-11-06/p1.jpg', 'p1.jpg', 1100, 825, '[투어] 거점'),
+      (${d}, 'photo', 'shared/2026-11-06/p2.jpg', 'p2.jpg', 1100, 825, '[강연] 발표') returning id`;
+    const selectedPhotos = [{ source: "shared", id: p1 }, { source: "shared", id: p2 }];
+    await (await import("@/app/api/days/[date]/draft/route")).PUT(request("PUT", "/x", { cookie: c.cookie, body: { selectedPhotos } }), params({ date: d }));
+  });
+
+  it("보고서가 없으면 수정할 수 없다", async () => {
+    const res = await revise(c.cookie, { request: "시사점을 더 구체적으로" });
+    expect(res.status).toBe(404);
+    expect(callModel).not.toHaveBeenCalled();
+  });
+
+  it("생성 프롬프트를 그대로 캐시 블록으로 두고, 직접 고친 현재 보고서와 수정 요청을 뒤에 붙인다", async () => {
+    callModel.mockResolvedValueOnce(reply(JSON.stringify({ title: "처음", schedule: [["09:30", "온보딩", "참석"]], photos: [{ no: 1, place: "photos" }, { no: 2, place: "schedule" }] })));
+    expect((await generate(c.cookie, {}, d)).status).toBe(200);
+    const genReq = callModel.mock.calls[0][0];
+    const current = (await (await getReport(c.cookie, d)).json()).bodyHtml as string;
+    await saveReport(c.cookie, { bodyHtml: current.replace("<h1>처음</h1>", "<h1>직접 고친 제목</h1>") }, d);
+
+    callModel.mockResolvedValueOnce(revised("시사점 보강"));
+    const res = await revise(c.cookie, { request: "  시사점을 더 구체적으로  " });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const req = callModel.mock.calls[1][0];
+    expect(req.prompt).toBe(genReq.prompt);
+    expect(req.images).toEqual(genReq.images);
+    expect(req.cacheTtl).toBe("1h");
+    expect(req.jsonSchema).toBe(genReq.jsonSchema);
+    expect(req.followUp).toContain("<h1>직접 고친 제목</h1>");
+    // 사진 자리는 사진 키 대신 프롬프트의 사진 번호로 보여 준다
+    expect(req.followUp).toContain("<p>[사진 2]</p>");
+    expect(req.followUp).not.toContain("shared:");
+    expect(req.followUp).toContain("[이번 수정 요청]\n시사점을 더 구체적으로");
+    expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 보고서에 반영됨]\n(없음)");
+    expect(body.report.title).toBe("시사점 보강");
+    expect(body.report.bodyHtml).toContain(`<div class="photos" data-photos="shared:${p1}"></div>`);
+    expect(body.revisions.map((r: { request: string }) => r.request)).toEqual(["시사점을 더 구체적으로"]);
+    expect(body.usage).toMatchObject({ reviseUsed: 1, reviseLimit: 15, reviseRemaining: 14, generateRemaining: 4 });
+    expect((await (await getReport(c.cookie, d)).json()).title).toBe("시사점 보강");
+    const [row] = await t.sql`select kind, success, cache_read_tokens from ai_usage where company_id = ${c.id} order by id desc limit 1`;
+    expect(row).toEqual({ kind: "revise", success: true, cache_read_tokens: 28_000 });
+  });
+
+  it("다음 수정 때 지난 수정 요청을 모두 순서대로 보낸다", async () => {
+    callModel.mockResolvedValueOnce(revised("짧게"));
+    expect((await revise(c.cookie, { request: "아까 바꾼 시사점을 조금 짧게" })).status).toBe(200);
+    callModel.mockResolvedValueOnce(revised("표"));
+    expect((await revise(c.cookie, { request: "일정 표에 장소 추가" })).status).toBe(200);
+    const req = callModel.mock.calls[1][0];
+    expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 보고서에 반영됨]\n1. 시사점을 더 구체적으로\n2. 아까 바꾼 시사점을 조금 짧게\n");
+    expect(req.followUp).toContain("[이번 수정 요청]\n일정 표에 장소 추가");
+    const list = await (await revisions(c.cookie)).json();
+    expect(list.revisions.map((r: { request: string }) => r.request)).toEqual(["시사점을 더 구체적으로", "아까 바꾼 시사점을 조금 짧게", "일정 표에 장소 추가"]);
+  });
+
+  it("AI가 실패하면 보고서·대화를 바꾸지 않고 횟수도 차감하지 않는다", async () => {
+    callModel.mockRejectedValueOnce(new Error("overloaded"));
+    const res = await revise(c.cookie, { request: "실패할 요청" });
+    expect(res.status).toBe(502);
+    expect((await (await getReport(c.cookie, d)).json()).title).toBe("표");
+    expect((await (await revisions(c.cookie)).json()).revisions).toHaveLength(3);
+    const day = await (await (await import("@/app/api/days/[date]/route")).GET(request("GET", "/x", { cookie: c.cookie }), params({ date: d }))).json();
+    expect(day.usage.reviseRemaining).toBe(12);
+  });
+
+  it("빈 요청이나 너무 긴 요청은 받지 않는다", async () => {
+    expect((await revise(c.cookie, { request: "   " })).status).toBe(400);
+    expect((await revise(c.cookie, { request: "가".repeat(1001) })).status).toBe(400);
+    expect(callModel).not.toHaveBeenCalled();
+  });
+
+  it("하루 수정 한도를 다 쓰면 AI를 부르지 않는다(AI-9)", async () => {
+    await t.sql`update companies set daily_revise_limit = 3 where id = ${c.id}`;
+    const res = await revise(c.cookie, { request: "한 번 더" });
+    expect(res.status).toBe(429);
+    expect((await res.json()).code).toBe("limit_reached");
+    expect(callModel).not.toHaveBeenCalled();
+    await t.sql`update companies set daily_revise_limit = 15 where id = ${c.id}`;
+  });
+
+  it("다른 회사는 이 회사의 수정 대화를 보거나 이 날짜 보고서를 고칠 수 없다(AUTH-8)", async () => {
+    expect((await (await revisions(b.cookie)).json()).revisions).toEqual([]);
+    expect((await revise(b.cookie, { request: "침입" })).status).toBe(404);
+    expect(callModel).not.toHaveBeenCalled();
+  });
+
+  it("보고서를 다시 만들면 수정 대화를 지운다", async () => {
+    callModel.mockResolvedValueOnce(reply(goodJson));
+    expect((await generate(c.cookie, { overwrite: true }, d)).status).toBe(200);
+    expect((await (await revisions(c.cookie)).json()).revisions).toEqual([]);
+  });
+});
