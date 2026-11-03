@@ -285,3 +285,7 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
 .fname:hover, .fname:focus-visible, .fcell:hover .fname { white-space: normal; overflow-wrap: anywhere; }
 .thumbs-wide { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 @media (max-width: 420px) { .thumbs-wide { grid-template-columns: repeat(3, 1fr); } }
+/* 날짜 목록은 스크롤 영역이라 바깥 outline이 잘린다. 선택 표시는 안쪽 그림자로 그린다. */
+.day-list li { cursor: pointer; }
+.day-list li.on { box-shadow: inset 0 0 0 2px var(--dp-brand); background: var(--surface-subtle); }
+.day-list li > .meta { flex-shrink: 1; min-width: 0; text-align: right; }
