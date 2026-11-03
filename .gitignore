@@ -19,3 +19,14 @@ data/
 .api-tracker/flow-record.json
 .api-tracker/flow.lock
 .api-tracker/flow-record.json.*.tmp
+
+# next.js
+/.next/
+/out/
+/coverage
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+*.pem
+npm-debug.log*
+
