@@ -274,3 +274,10 @@ details.pv pre { white-space: pre-wrap; max-height: 260px; overflow: auto; backg
 .drive-link { margin-bottom: 10px; }
 .issued-list { max-height: 50vh; overflow-y: auto; }
 .issued-list .secret { font-size: 15px; padding: 4px 8px; }
+/* 긴 파일 이름은 한 줄로 줄이고 버튼·글자 수는 줄이지 않는다. 전체 이름은 title로 보여 준다. */
+.files li > * { flex-shrink: 0; }
+.files li > .fname, .files li > .fcell { flex-shrink: 1; min-width: 0; }
+.fcell { display: flex; align-items: baseline; gap: 6px; }
+.fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.files li .row { flex-wrap: nowrap; }
+.work > *, .grid2 > * { min-width: 0; }

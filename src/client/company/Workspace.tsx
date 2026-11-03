@@ -356,7 +356,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                   <ul className="files">
                     {day.scheduleImages.map((s) => (
                       <li key={s.id}>
-                        <a href={s.url} target="_blank" rel="noreferrer">
+                        <a className="fname" href={s.url} target="_blank" rel="noreferrer" title={s.filename}>
                           {s.filename}
                         </a>
                         <span className="meta">일정 이미지 · AI에 함께 전달</span>
@@ -364,7 +364,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                     ))}
                     {schedMaterials.map((m) => (
                       <li key={m.id}>
-                        <span>{m.filename}</span>
+                        <span className="fname" title={m.filename}>{m.filename}</span>
                         <span className="meta">{m.chars.toLocaleString()}자</span>
                       </li>
                     ))}
@@ -380,7 +380,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                   <ul className="files">
                     {eduMaterials.map((m) => (
                       <li key={m.id}>
-                        <span>{m.filename}</span>
+                        <span className="fname" title={m.filename}>{m.filename}</span>
                         {m.hasOriginal ? (
                           <button type="button" className="btn-link" onClick={() => downloadMaterial(m.id)}>
                             원본 받기

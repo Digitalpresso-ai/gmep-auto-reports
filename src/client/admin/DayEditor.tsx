@@ -221,13 +221,13 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
             <ul className="files">
               {schedImages.map((f) => (
                 <li key={f.id}>
-                  <a href={f.url} target="_blank" rel="noreferrer">{f.filename}</a>
+                  <a className="fname" href={f.url} target="_blank" rel="noreferrer" title={f.filename}>{f.filename}</a>
                   <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/files/${f.id}`)}>삭제</button>
                 </li>
               ))}
               {day?.materials.filter((m) => m.kind === "schedule").map((m) => (
                 <li key={m.id}>
-                  <span>{m.filename} <span className="meta">{m.chars.toLocaleString()}자</span></span>
+                  <span className="fcell"><span className="fname" title={m.filename}>{m.filename}</span> <span className="meta">{m.chars.toLocaleString()}자</span></span>
                   <span className="row">
                     {m.hasOriginal && <button type="button" className="btn-link" onClick={() => download(m.id)}>원본</button>}
                     <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/materials/${m.id}`)}>삭제</button>
@@ -242,7 +242,7 @@ export function DayEditor({ date, onChanged }: { date: string; onChanged: () => 
             <ul className="files">
               {day?.materials.filter((m) => m.kind === "education").map((m) => (
                 <li key={m.id}>
-                  <span>{m.filename} <span className="meta">{m.chars.toLocaleString()}자</span></span>
+                  <span className="fcell"><span className="fname" title={m.filename}>{m.filename}</span> <span className="meta">{m.chars.toLocaleString()}자</span></span>
                   <span className="row">
                     {m.hasOriginal && <button type="button" className="btn-link" onClick={() => download(m.id)}>원본</button>}
                     <button type="button" className="btn-link btn-danger" onClick={() => remove(`/api/admin/days/${date}/materials/${m.id}`)}>삭제</button>
