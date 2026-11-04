@@ -1,7 +1,10 @@
-// ReAct 보고서 생성의 모델 호출(ai.ts streamModel) 행동 검사. 실제 Anthropic 호출은 하지 않고 SDK 스트림을 가짜로 바꿔 요청 본문과 이벤트 처리를 본다.
+// ReAct 보고서 생성 루프(report-agent.ts)와 그 모델 호출(ai.ts streamModel)의 행동 검사.
+// 실제 Anthropic 호출은 하지 않는다. 앞부분은 SDK 스트림을 가짜로 바꿔 요청 본문과 이벤트 처리를, 뒷부분은 streamModel을 가짜로 바꿔 루프를 본다.
 import type Anthropic from "@anthropic-ai/sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolUseEvent } from "@/server/ai";
+import type { StreamRequest, StreamResult, ToolUseEvent } from "@/server/ai";
+import type { BlockDoc } from "@/server/domain/blocks";
+import { GMEP_DAILY } from "@/server/domain/template";
 
 type Msg = Anthropic.Beta.BetaMessageParam;
 type RawEvent = Anthropic.Beta.BetaRawMessageStreamEvent;
@@ -31,6 +34,17 @@ vi.mock("@/server/domain/agent", () => ({
     { name: "add_paragraph", description: "문단", strict: true, input_schema: { type: "object", properties: {} } },
     { name: "finish", description: "마침", strict: true, input_schema: { type: "object", properties: {} } },
   ],
+}));
+
+const observe = vi.hoisted(() => ({
+  checkBlock: (html: string): string[] => (html.includes("길다") ? ["80자를 넘습니다."] : []),
+  planIssues: (_t: unknown, sections: { heading: string }[]): string[] => (sections.some((s) => s.heading === "주요 성과") ? [] : ["필수 섹션 '주요 성과'가 계획에 없습니다."]),
+  finalChecks: (): string[] => [],
+}));
+vi.mock("@/server/domain/observe", () => ({
+  checkBlock: (h: string) => observe.checkBlock(h),
+  planIssues: (t: unknown, s: { heading: string }[]) => observe.planIssues(t, s),
+  finalChecks: (...a: unknown[]) => (observe.finalChecks as (...x: unknown[]) => string[])(...a),
 }));
 
 const usageOf = (input = 100, output = 10) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
@@ -155,5 +169,242 @@ describe("streamModel", () => {
     expect(r.model).toBe("claude-opus-5-5");
     expect(r.content.map((b) => b.type)).toEqual(["fallback", "tool_use"]);
     expect(r.content[1]).toMatchObject({ id: "t2" });
+  });
+});
+
+// ---------- 가짜 streamModel로 ReAct 루프 ----------
+
+type Script = { blocks: ({ type: "tool_use"; id: string; name: string; input: unknown; error?: string } | { type: "fallback" } | { type: "text"; text: string })[]; stopReason: string };
+
+const model = vi.hoisted(() => ({ scripts: [] as Script[], requests: [] as StreamRequest[], log: undefined as string[] | undefined }));
+
+vi.mock("@/server/ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/ai")>();
+  return {
+    ...actual,
+    streamModel: async (req: StreamRequest, onToolUse?: (t: ToolUseEvent) => void): Promise<StreamResult> => {
+      model.requests.push(structuredClone({ ...req, onFallback: undefined, signal: undefined }));
+      const s = model.scripts.shift();
+      if (!s) throw new Error("스크립트가 없는 턴");
+      const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+      for (const b of s.blocks) {
+        if (b.type === "fallback") {
+          req.onFallback?.();
+          content.length = 0;
+          continue;
+        }
+        if (b.type === "text") {
+          content.push(b);
+          continue;
+        }
+        content.push({ type: "tool_use", id: b.id, name: b.name, input: b.error ? {} : (b.input as Record<string, unknown>) });
+        model.log?.push(`stream:${b.id}`);
+        onToolUse?.(b.error ? { id: b.id, name: b.name, input: null, error: b.error } : { id: b.id, name: b.name, input: b.input });
+      }
+      model.log?.push("stream:end");
+      return { content, stopReason: s.stopReason, model: req.model, usage: { input: 1000, output: 50, cacheRead: 800, cacheWrite: 0 }, latencyMs: 5, firstToolMs: 1 };
+    },
+  };
+});
+
+const tu = (id: string, name: string, input: unknown) => ({ type: "tool_use" as const, id, name, input });
+const para = (id: string, text: string, after: string | null = null) => tu(id, "add_paragraph", { text, after });
+const plan = (id: string, headings: string[]) => tu(id, "plan_outline", { sections: headings.map((heading) => ({ heading, intent: "" })) });
+const finish = (id: string) => tu(id, "finish", { note: "" });
+
+const empty: BlockDoc = { blocks: [] };
+// 나머지 사진 섹션을 두지 않은 양식으로 결과 HTML을 단순하게 본다
+const template = { ...GMEP_DAILY, restPhotosSection: undefined };
+
+async function run(scripts: Script[], over: Partial<Parameters<typeof import("@/server/report-agent").runReportAgent>[0]> = {}) {
+  const { runReportAgent } = await import("@/server/report-agent");
+  model.scripts = scripts;
+  model.requests = [];
+  const events: Record<string, unknown>[] = [];
+  const result = await runReportAgent({ model: "claude-sonnet-5-5", prompt: "P", images: [], template, photoKeys: [], doc: empty, onEvent: (e) => events.push(e), ...over });
+  return { result, events, requests: model.requests };
+}
+
+const toolResults = (m: Msg) => (m.content as Anthropic.Beta.BetaContentBlockParam[]).filter((b): b is Anthropic.Beta.BetaToolResultBlockParam => b.type === "tool_result");
+
+describe("runReportAgent", () => {
+  beforeEach(() => {
+    observe.finalChecks = () => [];
+  });
+
+  it("한 응답에 계획·블록 여러 개·finish가 오면 1턴에 끝나고 블록 이벤트가 순서대로 나온다", async () => {
+    const { result, events } = await run([{ blocks: [plan("p", ["기본 정보", "주요 성과"]), para("a", "가"), para("b", "나"), finish("f")], stopReason: "tool_use" }]);
+    expect(result).toMatchObject({ ok: true, html: "<p>가</p><p>나</p>", turns: 1, issues: [] });
+    expect(events.map((e) => e.type)).toEqual(["plan", "block", "block", "turn"]);
+    expect(events[0]).toEqual({ type: "plan", sections: [{ heading: "기본 정보", intent: "" }, { heading: "주요 성과", intent: "" }] });
+    expect(events.slice(1, 3)).toEqual([
+      { type: "block", op: "add_paragraph", id: "b1", html: "<p>가</p>" },
+      { type: "block", op: "add_paragraph", id: "b2", html: "<p>나</p>" },
+    ]);
+    if (result.ok) expect(result.usages).toHaveLength(1);
+  });
+
+  it("블록 이벤트는 턴이 끝나기 전, 그 tool_use가 끝나는 즉시 나간다", async () => {
+    const log: string[] = [];
+    model.log = log;
+    await run(
+      [{ blocks: [para("a", "가"), para("b", "나"), finish("f")], stopReason: "tool_use" }],
+      { onEvent: (e) => log.push(e.type === "block" ? `event:${String(e.id)}` : `event:${e.type}`) },
+    );
+    model.log = undefined;
+    expect(log).toEqual(["stream:a", "event:b1", "stream:b", "event:b2", "stream:f", "stream:end", "event:turn"]);
+  });
+
+  it("두 턴에 나눠 오면 tool_result가 tool_use id와 짝지어 한 user 메시지로 돌아간다", async () => {
+    const { result, requests } = await run([
+      { blocks: [plan("p", ["주요 성과"]), para("a", "가")], stopReason: "tool_use" },
+      { blocks: [para("b", "나"), finish("f")], stopReason: "tool_use" },
+    ]);
+    expect(result).toMatchObject({ ok: true, html: "<p>가</p><p>나</p>", turns: 2 });
+    expect(requests).toHaveLength(2);
+    expect(requests[0].turns).toEqual([]);
+    const turns = requests[1].turns;
+    expect(turns).toHaveLength(2);
+    expect(turns[0]).toEqual({ role: "assistant", content: [plan("p", ["주요 성과"]), para("a", "가")] });
+    expect(turns[1].role).toBe("user");
+    expect(toolResults(turns[1]).map((b) => [b.tool_use_id, b.content, b.is_error ?? false])).toEqual([
+      ["p", "ok", false],
+      ["a", "ok id=b1", false],
+    ]);
+  });
+
+  it("계획에 빠진 필수 섹션은 plan_outline의 tool_result로 돌려준다", async () => {
+    const { requests } = await run([
+      { blocks: [plan("p", ["기본 정보"])], stopReason: "tool_use" },
+      { blocks: [finish("f")], stopReason: "tool_use" },
+    ]);
+    expect(toolResults(requests[1].turns[1])[0].content).toContain("주요 성과");
+  });
+
+  it("없는 블록 id를 쓰면 is_error tool_result를 돌려주고 문서는 그대로 둔다", async () => {
+    const { result, events, requests } = await run([
+      { blocks: [para("a", "가"), tu("r", "replace_paragraph", { id: "b9", text: "x" })], stopReason: "tool_use" },
+      { blocks: [finish("f")], stopReason: "tool_use" },
+    ]);
+    const [, bad] = toolResults(requests[1].turns[1]);
+    expect(bad).toMatchObject({ tool_use_id: "r", is_error: true });
+    expect(String(bad.content)).toContain("b9");
+    expect(events.filter((e) => e.type === "block")).toHaveLength(1);
+    expect(result).toMatchObject({ ok: true, html: "<p>가</p>" });
+  });
+
+  it("JSON으로 읽지 못한 tool 입력은 실행하지 않고 is_error로 돌려준다", async () => {
+    const { requests } = await run([
+      { blocks: [{ ...para("a", "가"), error: "INVALID_JSON" }], stopReason: "tool_use" },
+      { blocks: [finish("f")], stopReason: "tool_use" },
+    ]);
+    expect(toolResults(requests[1].turns[1])[0]).toMatchObject({ tool_use_id: "a", is_error: true });
+  });
+
+  it("checkBlock 위반을 성공한 블록의 tool_result 문구에 붙인다", async () => {
+    const { requests } = await run([
+      { blocks: [para("a", "아주 길다")], stopReason: "tool_use" },
+      { blocks: [finish("f")], stopReason: "tool_use" },
+    ]);
+    const [r] = toolResults(requests[1].turns[1]);
+    expect(r.is_error ?? false).toBe(false);
+    expect(r.content).toContain("ok id=b1");
+    expect(r.content).toContain("80자를 넘습니다.");
+  });
+
+  it("finish에서 문제가 나오면 한 번 더 돌리고, 두 번째 finish 뒤에는 남은 문제와 함께 끝낸다", async () => {
+    observe.finalChecks = () => ["필수 섹션 '주요 성과'가 없습니다."];
+    const { result, events, requests } = await run([
+      { blocks: [para("a", "가"), finish("f1")], stopReason: "tool_use" },
+      { blocks: [para("b", "나"), finish("f2")], stopReason: "tool_use" },
+      { blocks: [finish("f3")], stopReason: "tool_use" },
+    ]);
+    expect(requests).toHaveLength(2);
+    const [, f1] = toolResults(requests[1].turns[1]);
+    expect(f1.tool_use_id).toBe("f1");
+    expect(f1.content).toContain("주요 성과");
+    expect(result).toMatchObject({ ok: true, turns: 2, html: "<p>가</p><p>나</p>", issues: ["필수 섹션 '주요 성과'가 없습니다."] });
+    expect(events.filter((e) => e.type === "issues")).toHaveLength(2);
+  });
+
+  it("finish 없이 end_turn이면 최종 검사를 해서 통과하면 끝낸다", async () => {
+    const { result } = await run([{ blocks: [para("a", "가"), { type: "text", text: "다 썼습니다." }], stopReason: "end_turn" }]);
+    expect(result).toMatchObject({ ok: true, turns: 1, issues: [] });
+  });
+
+  it("finish 없이 end_turn인데 문제가 있으면 문제를 알려 한 번 더 돌린다", async () => {
+    let n = 0;
+    observe.finalChecks = () => (n++ === 0 ? ["필수 섹션 '주요 성과'가 없습니다."] : []);
+    const { result, requests } = await run([
+      { blocks: [{ type: "text", text: "끝" }], stopReason: "end_turn" },
+      { blocks: [para("a", "가"), finish("f")], stopReason: "tool_use" },
+    ]);
+    expect(requests).toHaveLength(2);
+    const last = requests[1].turns.at(-1)!;
+    expect(last.role).toBe("user");
+    expect(JSON.stringify(last.content)).toContain("주요 성과");
+    expect(result).toMatchObject({ ok: true, turns: 2, issues: [] });
+  });
+
+  it.each([
+    ["max_tokens", "max_tokens"],
+    ["refusal", "refused"],
+  ])("%s이면 그 턴의 tool을 실행하지 않고 실패로 끝내며 사용량은 돌려준다", async (stopReason, reason) => {
+    const finalChecks = vi.fn(() => []);
+    observe.finalChecks = finalChecks;
+    const { result, requests } = await run([{ blocks: [plan("p", ["주요 성과"]), para("a", "가"), finish("f")], stopReason }]);
+    expect(result).toEqual({ ok: false, reason, usages: [expect.objectContaining({ input: 1000, output: 50 })] });
+    expect(finalChecks).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+  });
+
+  it("턴 한도를 넘으면 실패로 끝내고 쓴 턴의 사용량을 모두 돌려준다", async () => {
+    const { result, requests } = await run(
+      [
+        { blocks: [para("a", "가")], stopReason: "tool_use" },
+        { blocks: [para("b", "나")], stopReason: "tool_use" },
+        { blocks: [para("c", "다")], stopReason: "tool_use" },
+      ],
+      { limits: { maxTurns: 2 } },
+    );
+    expect(requests).toHaveLength(2);
+    expect(result).toMatchObject({ ok: false, reason: "turn_limit" });
+    expect(result.usages).toHaveLength(2);
+  });
+
+  it("시간 한도를 넘으면 다음 턴을 부르지 않고 실패로 끝낸다", async () => {
+    const { result, requests } = await run(
+      [
+        { blocks: [para("a", "가")], stopReason: "tool_use" },
+        { blocks: [finish("f")], stopReason: "tool_use" },
+      ],
+      { limits: { deadlineMs: 0 } },
+    );
+    expect(requests.length).toBeLessThanOrEqual(1);
+    expect(result).toMatchObject({ ok: false, reason: "deadline" });
+  });
+
+  it("모델 호출이 실패하면 ai_failed로 끝내고 앞 턴의 사용량은 돌려준다", async () => {
+    const { result } = await run([{ blocks: [para("a", "가")], stopReason: "tool_use" }]);
+    expect(result).toMatchObject({ ok: false, reason: "ai_failed" });
+    expect(result.usages).toHaveLength(1);
+  });
+
+  it("fallback이 오면 reset 이벤트를 보내고 그 턴에 앞서 적용한 블록을 되돌린다", async () => {
+    const { result, events, requests } = await run([
+      { blocks: [para("a", "버릴 문단"), { type: "fallback" }, para("b", "가")], stopReason: "tool_use" },
+      { blocks: [finish("f")], stopReason: "tool_use" },
+    ]);
+    expect(events.map((e) => e.type).slice(0, 3)).toEqual(["block", "reset", "block"]);
+    expect(events[1]).toEqual({ type: "reset", html: "" });
+    expect(events[2]).toMatchObject({ id: "b1", html: "<p>가</p>" });
+    expect(toolResults(requests[1].turns[1]).map((b) => b.tool_use_id)).toEqual(["b"]);
+    expect(result).toMatchObject({ ok: true, html: "<p>가</p>" });
+  });
+
+  it("수정은 기존 문서에서 시작해 바뀐 블록만 고친다", async () => {
+    const doc: BlockDoc = { blocks: [{ id: "b1", html: "<h1>제목</h1>" }, { id: "b2", html: "<p>원래</p>" }] };
+    const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, followUp: "고쳐 줘" });
+    expect(result).toMatchObject({ ok: true, html: "<h1>제목</h1><p>고침</p>" });
   });
 });
