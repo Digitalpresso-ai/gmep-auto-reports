@@ -40,7 +40,10 @@ const NOMINAL_ENDING = /(함|음|임|됨)$/;
 const NOUNS = new Set([
   "포함", "다음", "처음", "마음", "모음", "녹음", "발음", "소음", "믿음", "이음", "걸음", "웃음", "모임", "책임", "움직임",
   "프레임", "게임", "타임", "네임", "스킴", "크림", "드림", "팀",
+  "주임", "선임", "전임", "후임", "신임",
 ]);
+// "무책임", "런타임", "김철수 주임"처럼 예외 명사로 끝나는 합성어·직함도 명사이므로 낱말 끝으로 비교한다.
+const isNoun = (w: string) => [...NOUNS].some((n) => w.endsWith(n));
 
 /** 마지막 낱말(끝의 문장부호를 뗀 것)이 서술형 어미로 끝나면 그 낱말을 돌려준다. */
 function narrativeEnding(text: string): string | null {
@@ -49,7 +52,7 @@ function narrativeEnding(text: string): string | null {
   const last = text.replace(/[^\p{L}\p{N}]+$/u, "").split(/\s+/).pop() ?? "";
   if (!last) return null;
   if (DA_ENDING.test(last) || pastDa(last)) return last;
-  if (NOMINAL_ENDING.test(last) && !NOUNS.has(last)) return last;
+  if (NOMINAL_ENDING.test(last) && !isNoun(last)) return last;
   return null;
 }
 

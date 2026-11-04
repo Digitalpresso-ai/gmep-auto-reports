@@ -18,6 +18,12 @@ describe("checkBlock", () => {
     expect(checkBlock(ul("경쟁사·자사 경쟁 구분 프레임", "B2B 게임 시장", "리드 타임"))).toEqual([]);
   });
 
+  // 독립 리뷰에서 재현한 오판: 괄호 없는 직함, 예외 명사로 끝나는 합성어
+  it("괄호 없는 직함과 예외 명사로 끝나는 합성어도 서술형으로 보지 않는다", () => {
+    expect(checkBlock(ul("담당: 김철수 주임", "이영희 선임", "서버 런타임", "운영 책임", "무책임"))).toEqual([]);
+    for (const t of ["일정을 확인함", "수요가 있음", "핵심 고객임"]) expect(checkBlock(ul(t)).join(), t).toContain("서술형");
+  });
+
   it("표 칸의 서술형 종결은 계속 위반으로 알린다", () => {
     expect(checkBlock('<table class="kv"><tr><td>계획 대비</td><td>계획대로 이행함</td></tr></table>').join()).toContain("서술형");
   });
