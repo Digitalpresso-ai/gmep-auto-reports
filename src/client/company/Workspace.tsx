@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
-import { ApiError, api, errorText, fmtDate, kstToday } from "../api";
+import { ApiError, apiStream, api, errorText, fmtDate, kstToday } from "../api";
 import { useDialog } from "../dialog";
 import { imageForm, toJpeg } from "../files";
 import type { DayView, PhotoRef, Profile, ReportDoc, Revision, Usage } from "./types";
@@ -25,6 +25,8 @@ export function Workspace({ profile }: { profile: Profile }) {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [report, setReport] = useState<ReportDoc | null>(null);
   const [generating, setGenerating] = useState(false);
+  // 생성 응답을 받는 중이라 문서 시트에 완성된 섹션만 보이는 상태
+  const [streaming, setStreaming] = useState(false);
   const [revising, setRevising] = useState(false);
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [reviseText, setReviseText] = useState("");
@@ -314,11 +316,28 @@ export function Workspace({ profile }: { profile: Profile }) {
   async function generate(overwrite: boolean) {
     setConfirmOverwrite(false);
     if (!(await flushDraft())) return;
+    // 생성 중에는 서버가 직접 편집 저장을 409로 거부하고, 다시 만들면 직접 고친 내용은 사라진다(덮어쓰기 확인을 받음)
+    clearTimeout(reportTimer.current);
+    reportDirty.current = false;
     setGenerating(true);
     setElapsed(0);
     setStatus(null);
     try {
-      const r = await api<{ report: ReportDoc; usage: Usage }>(`/api/days/${date}/report`, { body: { overwrite } });
+      const got: { done?: { report: ReportDoc; usage: Usage } } = {};
+      // 섹션이 끝날 때마다 본문 전체가 온다. report 상태를 바꾸지 않고 DOM만 바꿔야 완료 전 본문이 저장·사진 채우기에 쓰이지 않는다.
+      await apiStream(`/api/days/${date}/report`, { overwrite }, (line) => {
+        // start는 사전 검사(이미 있음·한도·진행 중)를 통과한 뒤에만 온다. 그때 시트를 열어야 거절될 때 시트가 깜빡이지 않는다.
+        if (line.type === "start") {
+          setStreaming(true);
+          setDocOpen(true);
+          if (reportEl.current) reportEl.current.innerHTML = "";
+        } else if (line.type === "partial" && reportEl.current) reportEl.current.innerHTML = String(line.html ?? "");
+        else if (line.type === "reset" && reportEl.current) reportEl.current.innerHTML = "";
+        else if (line.type === "done") got.done = line as unknown as { report: ReportDoc; usage: Usage };
+        else if (line.type === "error") throw new ApiError(502, String(line.code ?? "ai_failed"), String(line.message ?? "보고서를 만들지 못했습니다"));
+      });
+      const r = got.done;
+      if (!r) throw new ApiError(0, "network", "연결이 끊겼습니다. 보고서는 서버에서 계속 만들어지니 잠시 뒤 다시 열어 주세요");
       setUsage(r.usage);
       setReport(r.report);
       setRevisions([]);
@@ -327,9 +346,14 @@ export function Workspace({ profile }: { profile: Profile }) {
       setReportSave({ text: "저장됨", err: false });
       setStage("chat");
     } catch (e) {
+      // 실패하면 서버의 보고서는 그대로다. 그리던 섹션을 지우고 이전 보고서로 되돌린다.
+      if (reportEl.current) reportEl.current.innerHTML = report?.bodyHtml ?? "";
+      fillPhotos();
+      if (!report) setDocOpen(false);
       if (e instanceof ApiError && e.code === "limit_reached") setUsage((u) => (u ? { ...u, generateRemaining: 0 } : u));
       setStatus({ kind: "err", text: errorText(e), retry: e instanceof ApiError && e.status !== 429 && e.code !== "report_exists" });
     } finally {
+      setStreaming(false);
       setGenerating(false);
     }
   }
@@ -711,12 +735,14 @@ export function Workspace({ profile }: { profile: Profile }) {
             </button>
           </div>
           <div className="sheet-body">
-            <p className="hint sheet-hint">문장을 눌러 직접 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다.</p>
+            <p className="hint sheet-hint">
+              {streaming ? "작성이 끝난 섹션부터 차례로 보입니다. 다 만들어지면 사진이 들어가고 직접 고칠 수 있습니다." : "문장을 눌러 직접 고칠 수 있습니다. 고친 내용 그대로 Word 파일에 들어갑니다."}
+            </p>
             <div className="paper">
               <div
                 id="report"
                 ref={reportEl}
-                hidden={!report}
+                hidden={!report && !streaming}
                 contentEditable={Boolean(report) && !aiBusy}
                 suppressContentEditableWarning
                 onInput={() => {
