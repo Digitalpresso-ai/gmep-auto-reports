@@ -27,24 +27,18 @@ function ownText(el: Element): string {
   );
 }
 
-// 프롬프트 [추가 규칙]의 서술형: "~습니다/~했다/~함/~음/~임/~있음/~해야 함". ~다 종결은 "캐나다" 같은 고유명사와 겹치지 않게 어미만 고른다.
-// "됨"은 규칙 문구에 없지만 "함"의 피동(진행됨)이라 같이 본다.
+// 프롬프트 [추가 규칙]의 서술형 중 거의 틀리지 않는 꼴만 기계로 잡는다(2026-11-04 사용자 결정). 명사와 겹치는 꼴(형용사 ~다, ~음·~임,
+// 두 글자 ~함)은 규칙을 덧대도 독립 리뷰마다 반례(클레임·결함·묶음·크다)가 나왔다. 오판은 고치는 턴을 늘리므로 놓치는 쪽을 택하고 품질 채점에 맡긴다.
 const DA_ENDING = /(니다|겠다|한다|된다|있다|없다|이다)$/;
-/** "~했다/~만났다"처럼 ㅆ 받침 음절 뒤의 "다"(과거 종결). */
-const pastDa = (w: string) => {
-  const c = w.length >= 2 && w.endsWith("다") ? w.charCodeAt(w.length - 2) - 0xac00 : -1;
+/** 마지막 음절 앞 음절의 받침이 ㅆ인지("했다·만났다·했음·있음"). */
+const ssBefore = (w: string, last: string) => {
+  const c = w.length >= 2 && w.endsWith(last) ? w.charCodeAt(w.length - 2) - 0xac00 : -1;
   return c >= 0 && c < 11172 && c % 28 === 20;
 };
-// "~임"은 규칙상 서술형이지만 클레임·프레임·주임처럼 '임'으로 끝나는 명사가 많아 목록으로 다 막을 수 없다. 오판은 고치는 턴을 늘리므로
-// 기계 검사에서는 빼고 프롬프트 규칙과 품질 채점에 맡긴다(2026-11-04 실제 자료 평가·독립 리뷰).
-const NOMINAL_ENDING = /(음|됨)$/;
-// "~함" 종결은 "확인함·검토함·미흡함"처럼 세 글자 이상이거나 "해야 함"처럼 떨어져 쓴다. "결함·직함·명함·포함"처럼 두 글자 낱말은 명사로 본다.
-// 목록으로 명사를 막으면 끝이 없어(독립 리뷰 v3) 음절 수로 가른다. 두 글자 형용사형("강함")은 놓치지만 품질 채점이 본다.
-const narrativeHam = (w: string) => w.endsWith("함") && (w === "함" || Array.from(w).length >= 3);
-// 음·함으로 끝나지만 명사인 낱말(세 글자 이상이거나 음으로 끝나는 것). 보고서에 흔히 나오는 것만 둔다.
-const NOUNS = new Set(["포함", "다음", "처음", "마음", "모음", "녹음", "발음", "소음", "믿음", "이음", "걸음", "웃음"]);
-// "첫걸음"처럼 예외 명사로 끝나는 합성어도 명사이므로 낱말 끝으로 비교한다.
-const isNoun = (w: string) => [...NOUNS].some((n) => w.endsWith(n));
+/** "확인함·검토함"처럼 세 글자 이상이거나 "해야 함"처럼 떨어진 "함". "결함·직함·포함" 같은 두 글자 명사와 "불포함"은 뺀다. */
+const narrativeHam = (w: string) => w.endsWith("함") && !w.endsWith("포함") && (w === "함" || Array.from(w).length >= 3);
+/** "진행됨·확정됨". */
+const narrativeDoem = (w: string) => w.endsWith("됨") && Array.from(w).length >= 2;
 
 /** 마지막 낱말(끝의 문장부호를 뗀 것)이 서술형 어미로 끝나면 그 낱말을 돌려준다. */
 function narrativeEnding(text: string): string | null {
@@ -52,9 +46,9 @@ function narrativeEnding(text: string): string | null {
   if (/[)\]」』》〉]\s*$/.test(text)) return null;
   const last = text.replace(/[^\p{L}\p{N}]+$/u, "").split(/\s+/).pop() ?? "";
   if (!last) return null;
-  if (DA_ENDING.test(last) || pastDa(last)) return last;
-  if (narrativeHam(last) && !isNoun(last)) return last;
-  if (NOMINAL_ENDING.test(last) && !isNoun(last)) return last;
+  if (DA_ENDING.test(last) || ssBefore(last, "다")) return last;
+  if (ssBefore(last, "음") || last.endsWith("없음")) return last;
+  if (narrativeHam(last) || narrativeDoem(last)) return last;
   return null;
 }
 
