@@ -43,6 +43,7 @@
 | FUNC-16 | 디지털프레소 로고 표시: 로그인 화면·상단 헤더. 파일은 `public/brand/`(digitalpresso-design 자산). Word 보고서에는 넣지 않음 | 2026-11-03 사용자 요청("디지털프레소 로고가 들어가야 함"), 답변 "화면에만" | 1차 | `src/client/company/Login.tsx`, `CompanyApp.tsx`, `src/client/admin/AdminApp.tsx` | 미검증(로컬 화면 확인) |
 | FUNC-17 | 생성 전 입력(일정 복사본·사진 선택·추가 사진·특이사항)은 회사·날짜별 초안으로 서버에 자동 저장. 다른 기기·재방문 시 그대로 복원 | 2026-11-03 사용자 답변("날짜별 자동 저장"), SHARED-2 | 1차 | `src/server/workspace.ts`, `PUT /api/days/[date]/draft` / `tests/api/company.test.ts` | 검증됨 |
 | FUNC-18 | 같은 날짜 보고서가 있으면 '다시 만들기' 전에 "직접 고친 내용이 사라집니다" 확인. 확인 시 덮어쓰고 생성 1회 차감 | 2026-11-03 사용자 답변("덮어쓰기 확인 후 생성"), FUNC-12 | 1차 | `src/server/generate.ts`, `src/client/company/Workspace.tsx` / `tests/api/report.test.ts` | 검증됨 |
+| FUNC-19 | 보고서 양식(섹션 구성·순서·필수 여부·섹션별 작성 지침)을 데이터로 분리해, 양식이 바뀌어도 생성·수정·미리보기·Word가 같은 코드로 동작. Word 서식 파일 업로드는 범위 밖 | 2026-11-04 사용자 요청("문서 양식이 바뀌어도 잘 작동해야 함", 범위 "섹션·지침까지") | 2차 | `src/server/domain/template.ts` / `tests/domain/template.test.ts` | 구현 중 |
 | FUNC-X | 범위 제외: 구글 드라이브 직접 연동(ZIP으로 대체), HWP 읽기 | p.3 §3 | — | — | 제외 |
 
 ## 날짜별 공통 자료
@@ -75,6 +76,7 @@
 | AI-11 | 앱 내부 전체 월 토큰 예산, 80% 도달 시 관리자 메일 알림. 예산 금액은 Anthropic Console 워크스페이스 한도와 같게 둠(D1) | p.4 §4-2 ③, 2026-11-03 사용자 답변 | 2차 | — | 미구현 |
 | AI-12 | 호출마다 usage(입력·출력 토큰)를 회사·일시·종류(생성/수정)·모델·성공 여부와 저장 → 관리자 화면에 회사별·일별 표. 공통 사진 설명(PHOTO-1) 호출은 회사 없이 종류 photo_describe로 기록하고 회사별 한도에는 넣지 않음 | p.4 §4-2, p.4 §5-1, 2026-11-04 사용자 요청("사진 설명 기록부터") | 1차(기록)·2차(화면) | `src/server/usage.ts` recordUsage, `src/server/photo-describe.ts`, `db/migrations/0008_usage_photo_describe.sql` / `tests/api/report.test.ts`, `tests/api/admin.test.ts`, `tests/db/migration.test.ts` | 검증됨(기록, 가짜 AI). 관리자 표는 2차. 원격 DB에 0008 미적용 |
 | AI-13 | 프롬프트 캐싱: 생성 요청의 일정 이미지·자료·규칙 블록을 1시간 캐시하고, AI 수정(FUNC-10)은 같은 블록 뒤에 요청을 붙여 캐시를 읽음. 캐시 읽기·쓰기 토큰을 ai_usage에 따로 기록. 사진 설명(PHOTO-1)은 공통 지시문이 캐시 최소 길이(512토큰)보다 짧아 적용하지 않음 | 2026-11-04 사용자 요청 | 1차 | `src/server/ai.ts` userContent, `src/server/generate.ts`, `db/migrations/0007_usage_cache_tokens.sql` / `tests/domain/ai-request.test.ts`, `tests/api/report.test.ts` | 검증됨(요청 블록 구성·기록). 2026-11-04 실제 호출(claude-sonnet-5-5, 합성 자료): 생성에서 4,655토큰 캐시 쓰기, 이어진 수정 2회에서 각각 4,655토큰 캐시 읽기 |
+| AI-14 | 생성·수정을 블록 편집 tool(블록 추가·교체·삭제, 섹션 이름 없음) 호출로 수행하고 Plan→Act→Observe(ReAct) 루프로 돌림: 작성 계획 → 블록 tool 호출 → 결과·검사(필수 섹션, 규칙 위반) 관찰 → 고치기 → 마침. 블록이 완성될 때마다 스트리밍으로 미리보기에 그림. 부분 보고서는 저장하지 않음. 바꾸기 전 지금 방식의 토큰·속도·품질 베이스라인을 같은 평가로 기록 | 2026-11-04 사용자 요청("스트리밍 기반", "진짜 블럭을 추가한다거나 그런 식의 tool call", "plan - act - observe ... react 패턴") | 2차 | `src/server/domain/blocks.ts`, `scripts/eval` / `tests/domain/blocks.test.ts` | 구현 중(도메인·평가 하네스). 서버 루프·화면 미착수. 베이스라인·실험 실제 호출은 승인 대기 |
 
 ## 저장·배포·보안
 
