@@ -43,6 +43,8 @@ export function Workspace({ profile }: { profile: Profile }) {
   const draftTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reportTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reportDirty = useRef(false);
+  // 보내는 중인 저장 요청 수. 끝나기 전에 창을 닫으면 저장이 끊길 수 있어 떠나기 확인을 띄운다.
+  const savingCount = useRef(0);
   const reportEl = useRef<HTMLDivElement>(null);
 
   // ---------- 초안 자동 저장(FUNC-17) ----------
@@ -53,7 +55,12 @@ export function Workspace({ profile }: { profile: Profile }) {
     pendingDraft.current = null;
     setDraftSaving("saving");
     try {
-      await api(`/api/days/${p.date}/draft`, { method: "PUT", body: p.patch });
+      savingCount.current++;
+      try {
+        await api(`/api/days/${p.date}/draft`, { method: "PUT", body: p.patch });
+      } finally {
+        savingCount.current--;
+      }
       setDraftSaving("saved");
       return true;
     } catch (e) {
@@ -98,7 +105,12 @@ export function Workspace({ profile }: { profile: Profile }) {
     clone.querySelectorAll(".photos").forEach((p) => (p.innerHTML = ""));
     setReportSave({ text: "저장 중…", err: false });
     try {
-      await api(`/api/days/${date}/report`, { method: "PUT", body: { bodyHtml: clone.innerHTML } });
+      savingCount.current++;
+      try {
+        await api(`/api/days/${date}/report`, { method: "PUT", body: { bodyHtml: clone.innerHTML } });
+      } finally {
+        savingCount.current--;
+      }
       reportDirty.current = false;
       setReportSave({ text: `저장됨 ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`, err: false });
       return true;
@@ -216,6 +228,19 @@ export function Workspace({ profile }: { profile: Profile }) {
     window.addEventListener("pagehide", h);
     return () => window.removeEventListener("pagehide", h);
   }, [flushDraft, flushReport]);
+
+  // 저장이 남아 있으면 바로 저장을 보내고, 브라우저의 떠나기 확인 창으로 끝날 때까지 기다리게 한다
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => {
+      if (!pendingDraft.current && !reportDirty.current && savingCount.current === 0 && !aiBusy) return;
+      flushDraft();
+      flushReport();
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [flushDraft, flushReport, aiBusy]);
 
   // ---------- 사진(FUNC-6, SHARED-3) ----------
   function toggle(ref: PhotoRef) {
