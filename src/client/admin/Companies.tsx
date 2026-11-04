@@ -188,7 +188,7 @@ export function Companies() {
           >
             <h3>{limitEdit.row ? `${limitEdit.row.label} 하루 횟수` : "모든 회사 하루 횟수"}</h3>
             <p style={{ margin: "0 0 12px" }}>
-              오늘 이미 쓴 횟수는 그대로 두고 남은 횟수만 새 한도로 다시 계산합니다. 횟수는 독일 시간 자정에 다시 시작합니다.
+              오늘 이미 쓴 횟수는 그대로 두고 남은 횟수만 새 한도로 다시 계산합니다.
             </p>
             <div className="row">
               <label style={{ flex: 1 }}>
