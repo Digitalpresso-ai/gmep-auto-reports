@@ -31,3 +31,34 @@ export function placementFromHtml(html: string): Map<string, string> {
   }
   return out;
 }
+
+export type SectionChange = { key: string; status: "same" | "changed" | "added" | "removed" };
+
+// 글자와 사진 자리만 비교한다. 제목 번호·태그 모양·공백 차이는 바뀐 것으로 보지 않는다.
+const fingerprint = (html: string) =>
+  textOf(html.replace(/^<h2[^>]*>[\s\S]*?<\/h2>/, "")) + "|" + [...html.matchAll(/data-photos="([^"]*)"/g)].map((m) => m[1]).join(";");
+
+function keyed(html: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const s of splitSections(html)) {
+    const base = s.heading ? headingKey(s.heading) : "(제목)";
+    let key = base;
+    for (let n = 2; out.has(key); n++) key = `${base}#${n}`;
+    out.set(key, fingerprint(s.html));
+  }
+  return out;
+}
+
+/** 수정 전후 HTML을 번호 뗀 h2 제목으로 맞춰 섹션마다 바뀌었는지 돌려준다. 순서는 수정 후 기준, 사라진 섹션은 끝에 둔다. */
+export function diffSections(before: string, after: string): SectionChange[] {
+  const a = keyed(before);
+  const b = keyed(after);
+  const out: SectionChange[] = [...b].map(([key, fp]) => ({ key, status: !a.has(key) ? "added" : a.get(key) === fp ? "same" : "changed" }));
+  for (const key of a.keys()) if (!b.has(key)) out.push({ key, status: "removed" });
+  return out;
+}
+
+/** 요청한 섹션(targets, 번호 뗀 h2 제목) 밖에서 바뀐 섹션. */
+export function unexpectedChanges(changes: SectionChange[], targets: string[]): SectionChange[] {
+  return changes.filter((c) => c.status !== "same" && !targets.includes(c.key.replace(/#\d+$/, "")));
+}
