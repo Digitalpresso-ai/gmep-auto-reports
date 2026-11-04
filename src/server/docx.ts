@@ -10,9 +10,8 @@ import { assignPhotos, parsePhotoKeys } from "@/lib/photo-layout";
 const FONT = "맑은 고딕";
 const A4 = { width: 11906, height: 16838 };
 const CONTENT_WIDTH = 9638;
-// 사진은 2열 격자로 넣는다. 한 칸은 4:3 가로 사진 기준 300×225px 안에 맞추고, 1장뿐이면 가운데 크게 둔다.
-const CELL_PX = { width: 300, height: 225 };
-const SINGLE_PX = { width: 420, height: 315 };
+// 참여 사진은 한 줄에 한 장씩 넣는다. 가로 4:3 사진이 600×450px(사용자 예시 양식과 같은 크기)이 되게 하고, 세로 사진은 높이 600px까지 둔다.
+const PHOTO_PX = { width: 600, height: 600 };
 
 type Node = { type: string; data?: string; name?: string; attribs?: Record<string, string>; children?: Node[] };
 /** key는 photoKey()("shared:<id>"). 배열은 회사가 고른 순서다. */
@@ -95,32 +94,15 @@ function fit(p: DocxPhoto, box: { width: number; height: number }) {
   return { width: Math.round(p.width * scale), height: Math.round(p.height * scale) };
 }
 
-const imageParagraph = (p: DocxPhoto, box: { width: number; height: number }) =>
-  new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: p.type, data: p.bytes, transformation: fit(p, box) })] });
-
-const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
-
 function photoBlock(photos: DocxPhoto[]): FileChild[] {
-  if (photos.length === 1) return [imageParagraph(photos[0], SINGLE_PX), new Paragraph({ children: [], spacing: { after: 120 } })];
-  const half = CONTENT_WIDTH / 2;
-  const rows: TableRow[] = [];
-  for (let i = 0; i < photos.length; i += 2) {
-    rows.push(
-      new TableRow({
-        cantSplit: true,
-        children: [photos[i], photos[i + 1]].map(
-          (p) =>
-            new TableCell({
-              width: { size: half, type: WidthType.DXA },
-              margins: { top: 60, bottom: 60, left: 60, right: 60 },
-              children: [p ? imageParagraph(p, CELL_PX) : new Paragraph({ children: [] })],
-            }),
-        ),
+  return photos.map(
+    (p) =>
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 160 },
+        children: [new ImageRun({ type: p.type, data: p.bytes, transformation: fit(p, PHOTO_PX) })],
       }),
-    );
-  }
-  const borders = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER };
-  return [new Table({ width: { size: CONTENT_WIDTH, type: WidthType.DXA }, columnWidths: [half, half], borders, rows }), new Paragraph({ children: [], spacing: { after: 120 } })];
+  );
 }
 
 const isPhotoBox = (n: Node) => isTag(n, "div") && (n.attribs?.class ?? "").split(/\s+/).includes("photos");
@@ -128,7 +110,7 @@ const isPhotoBox = (n: Node) => isTag(n, "div") && (n.attribs?.class ?? "").spli
 function docChildren(html: string, photos: DocxPhoto[]): FileChild[] {
   const root = parseDocument(html) as unknown as Node;
   const els = kids(root);
-  // AI가 섹션 옆에 둔 자리에는 그 사진을, 나머지 고른 사진은 참여 사진 자리에 넣는다(PHOTO-2)
+  // 고른 사진은 모두 참여 사진 자리에 넣는다(PHOTO-2)
   const boxes = els.filter(isPhotoBox);
   const assigned = assignPhotos(boxes.map((b) => parsePhotoKeys(b.attribs?.["data-photos"])), photos.map((p) => p.key));
   const byKey = new Map(photos.map((p) => [p.key, p]));
@@ -141,7 +123,7 @@ function docChildren(html: string, photos: DocxPhoto[]): FileChild[] {
     }
     if (el.type !== "tag") continue;
     const next = els.slice(idx + 1).find((n) => n.type === "tag");
-    // 비어 있는 참여 사진 자리의 제목은 넣지 않는다(사진이 모두 본문에 배치된 경우)
+    // 고른 사진이 없으면 비어 있는 참여 사진 자리의 제목은 넣지 않는다
     if (isTag(el, "h2") && next && isPhotoBox(next) && next.attribs?.["data-photos"] === undefined && !boxPhotos.get(next)?.length) continue;
     if (isTag(el, "h1", "h2", "h3")) out.push(heading(textOf(el), el.name as "h1" | "h2" | "h3"));
     else if (isTag(el, "ul", "ol")) listParas(el, 0, out);

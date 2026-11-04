@@ -82,8 +82,8 @@ describe("다른 양식에서도 같은 코드가 동작한다", () => {
     const doc = withRestPhotos(WEEKLY, parseBlocks(html));
     expect(renderDoc(doc)).toBe(`<h2>1. 개요</h2><div class="photos" data-photos="${k1}"></div><h2>2. 진행 상황</h2><p>x</p><h2>3. 현장 사진</h2><div class="photos"></div><h2>이슈</h2><p>y</p>`);
     expect(new Set(doc.blocks.map((b) => b.id)).size).toBe(doc.blocks.length);
-    // 자리에 적힌 사진은 그 자리에, 나머지는 키 없는 마지막 자리에 들어간다
-    expect(assignPhotos(boxesOf(doc), [k1, k2])).toEqual([[k1], [k2]]);
+    // 고른 사진은 모두 키 없는 자리에 들어간다
+    expect(assignPhotos(boxesOf(doc), [k1, k2])).toEqual([[], [k1, k2]]);
   });
 });
 

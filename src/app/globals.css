@@ -313,8 +313,8 @@ details.fold[open] > summary { margin-bottom: 4px; }
 #report th, #report td { border: 1px solid #c7ccd4; padding: 6px 8px; vertical-align: top; text-align: left; }
 #report th { background: #eef1f5; font-weight: 700; }
 #report table.kv td:first-child { background: #eef1f5; font-weight: 700; width: 120px; }
-#report .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
-#report .photos img { width: 100%; border-radius: 2px; }
+#report .photos { display: grid; grid-template-columns: 1fr; justify-items: center; gap: 12px; margin-top: 8px; }
+#report .photos img { width: 100%; max-width: 600px; border-radius: 2px; }
 #report .photos p { color: var(--dp-ink-400); grid-column: 1 / -1; }
 
 .modal-veil { position: fixed; inset: 0; background: rgba(10, 31, 92, 0.35); display: grid; place-items: center; padding: 16px; z-index: 50; }

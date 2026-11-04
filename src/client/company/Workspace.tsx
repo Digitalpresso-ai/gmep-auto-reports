@@ -176,7 +176,7 @@ export function Workspace({ profile }: { profile: Profile }) {
   // ---------- 미리보기에 보고서·사진 넣기 ----------
   const photoUrl = useCallback((key: string) => day?.photos.find((p) => photoKey(p) === key)?.url ?? "", [day]);
 
-  // AI가 섹션 옆에 둔 사진은 그 자리에, 나머지는 참여 사진 자리에 넣는다(PHOTO-2). 참여 사진 자리가 비면 그 제목을 숨긴다.
+  // 고른 사진은 모두 참여 사진 자리에 한 줄에 한 장씩 넣는다(PHOTO-2). 참여 사진 자리가 비면 그 제목을 숨긴다.
   const fillPhotos = useCallback(() => {
     const boxes = [...(reportEl.current?.querySelectorAll<HTMLElement>(".photos") ?? [])];
     if (!boxes.length) return;

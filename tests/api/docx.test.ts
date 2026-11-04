@@ -64,6 +64,7 @@ describe("FUNC-11 Word 다운로드", () => {
 describe("PHOTO-2 Word 사진 배치", () => {
   const d = "2026-11-03";
   const docXml = async () => JSZip.loadAsync(await (await download(a.cookie, d)).arrayBuffer()).then((z) => z.file("word/document.xml")!.async("string"));
+  const drawingsOf = (doc: string) => [...doc.matchAll(/<w:drawing>/g)].map((m) => m.index!);
 
   beforeAll(async () => {
     await t.sql`insert into shared_days (report_date) values (${d})`;
@@ -75,32 +76,31 @@ describe("PHOTO-2 Word 사진 배치", () => {
       ids.push(p.id);
     }
     await t.sql`insert into drafts (company_id, report_date, selected_photos) values (${a.id}, ${d}, ${t.sql.json(ids.slice(0, 2).map((id) => ({ source: "shared", id })))})`;
-    // 사진 3은 AI가 배치했지만 회사가 선택에서 뺐다
+    // 예전 방식으로 AI가 교육 세션 뒤에 둔 사진 자리가 남아 있는 보고서. 사진 3은 회사가 선택에서 뺐다
     const html =
       `<h1>보고서</h1><h2>1. 세부 교육 내용</h2><h3>강연</h3><ul><li>강연 요약</li></ul><div class="photos" data-photos="shared:${ids[1]} shared:${ids[0]} shared:${ids[2]}"></div>` +
       '<h2>2. 시사점</h2><ul><li>시사점 요약</li></ul><h2>3. 참여 사진</h2><div class="photos"></div><h2>붙임</h2><ul><li>강연 자료</li></ul>';
     await t.sql`insert into reports (company_id, report_date, title, body_html) values (${a.id}, ${d}, '보고서', ${html})`;
   });
 
-  it("AI가 둔 자리에 고른 사진만 넣고, 모두 본문에 들어가면 참여 사진 제목을 뺀다", async () => {
+  it("고른 사진은 본문 섹션에 넣지 않고 참여 사진에 한 줄에 한 장씩 넣는다", async () => {
     const doc = await docXml();
-    const drawings = [...doc.matchAll(/<w:drawing>/g)].map((m) => m.index!);
+    const drawings = drawingsOf(doc);
     expect(drawings).toHaveLength(2);
-    expect(doc.indexOf("강연 요약")).toBeLessThan(drawings[0]);
-    expect(drawings[1]).toBeLessThan(doc.indexOf("시사점 요약"));
-    expect(doc).not.toContain("참여 사진");
-    expect(doc).toContain("붙임");
+    expect(drawings[0]).toBeGreaterThan(doc.indexOf("참여 사진"));
+    expect(drawings[0]).toBeGreaterThan(doc.indexOf("시사점 요약"));
+    expect(drawings[1]).toBeLessThan(doc.indexOf("붙임"));
+    // 사진을 표 칸에 넣지 않는다(2열 격자 아님)
+    expect(doc.slice(doc.indexOf("참여 사진"), doc.indexOf("붙임"))).not.toContain("<w:tbl>");
+    // 가로 사진은 본문 폭 기준 600px(5715000 EMU) 너비로 넣는다
+    expect(doc).toContain('cx="5715000"');
   });
 
-  it("고른 사진 중 자리에 없는 사진은 참여 사진 칸에 넣는다", async () => {
-    const [p4] = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height)
-      values (${d}, 'photo', ${`shared/${d}/p1.jpg`}, 'p4.jpg', 825, 1100) returning id`;
-    await t.sql`update drafts set selected_photos = selected_photos || ${t.sql.json([{ source: "shared", id: p4.id }])} where company_id = ${a.id} and report_date = ${d}`;
+  it("고른 사진이 없으면 참여 사진 제목을 넣지 않는다", async () => {
+    await t.sql`update drafts set selected_photos = '[]'::jsonb where company_id = ${a.id} and report_date = ${d}`;
     const doc = await docXml();
-    const drawings = [...doc.matchAll(/<w:drawing>/g)].map((m) => m.index!);
-    expect(drawings).toHaveLength(3);
-    expect(doc.indexOf("참여 사진")).toBeGreaterThan(doc.indexOf("시사점 요약"));
-    expect(drawings[2]).toBeGreaterThan(doc.indexOf("참여 사진"));
-    expect(drawings[2]).toBeLessThan(doc.indexOf("붙임"));
+    expect(drawingsOf(doc)).toHaveLength(0);
+    expect(doc).not.toContain("참여 사진");
+    expect(doc).toContain("붙임");
   });
 });
