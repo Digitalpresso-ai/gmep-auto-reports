@@ -18,7 +18,7 @@ afterAll(async () => {
 
 describe("DATA-1 스키마", () => {
   it("migration을 순서대로 적용하고 두 번째 실행은 아무것도 적용하지 않는다", async () => {
-    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql", "0005_photo_descriptions.sql", "0006_report_revisions.sql", "0007_usage_cache_tokens.sql"]);
+    expect(await migrate(sql)).toEqual(["0001_init.sql", "0002_shared_days_drafts_admin.sql", "0003_seed_companies.sql", "0004_original_files.sql", "0005_photo_descriptions.sql", "0006_report_revisions.sql", "0007_usage_cache_tokens.sql", "0008_usage_photo_describe.sql"]);
     expect(await migrate(sql)).toEqual([]);
   });
 
@@ -33,6 +33,13 @@ describe("DATA-1 스키마", () => {
   it("사용량 종류는 생성·수정만 허용한다", async () => {
     const [a] = await sql`select id from companies where name = 'A사'`;
     await expect(sql`insert into ai_usage (company_id, kind, model, success) values (${a.id}, 'other', 'm', true)`).rejects.toThrow(/ai_usage_kind_check/);
+  });
+
+  it("공통 사진 설명 사용량만 회사 없이 기록한다", async () => {
+    const [a] = await sql`select id from companies where name = 'A사'`;
+    await sql`insert into ai_usage (company_id, kind, model, success) values (null, 'photo_describe', 'm', true)`;
+    await expect(sql`insert into ai_usage (company_id, kind, model, success) values (null, 'generate', 'm', true)`).rejects.toThrow(/ai_usage_company_check/);
+    await expect(sql`insert into ai_usage (company_id, kind, model, success) values (${a.id}, 'photo_describe', 'm', true)`).rejects.toThrow(/ai_usage_company_check/);
   });
 
   it("모든 업무 테이블에 RLS가 켜져 있다", async () => {

@@ -25,9 +25,10 @@ export async function usageCounts(companyId: string, now = new Date()): Promise<
   };
 }
 
+/** 공통 사진 설명(photo_describe)은 회사 없이(companyId: null) 기록한다. */
 export type UsageEntry = {
-  companyId: string;
-  kind: "generate" | "revise";
+  companyId: string | null;
+  kind: "generate" | "revise" | "photo_describe";
   model: string;
   inputTokens: number;
   outputTokens: number;

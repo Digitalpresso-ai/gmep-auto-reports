@@ -271,6 +271,29 @@ describe("PHOTO-1 공통 사진 설명", () => {
     expect(row.description).toBeNull();
   });
 
+  it("설명 호출마다 회사 없이 사용량을 기록하고, 실패한 호출도 기록한다(AI-12)", async () => {
+    await runBackground();
+    const day = "2026-11-12";
+    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
+    for (let n = 0; n < 3; n++) await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: day }));
+    background.length = 0;
+    await t.sql`delete from ai_usage where kind = 'photo_describe'`;
+    callModel.mockReset();
+    callModel
+      .mockResolvedValueOnce(answer(JSON.stringify({ scene: "강연 장면", activity: "강연", visible_text: "" })))
+      .mockResolvedValueOnce(answer("설명할 수 없습니다"))
+      .mockRejectedValueOnce(new Error("overloaded"));
+    const res = await (await import("@/app/api/admin/days/[date]/files/describe/route")).POST(request("POST", "/x", { cookie: admin }), params({ date: day }));
+    expect(await res.json()).toEqual({ described: 1, failed: 2, remaining: 2 });
+    const rows = await t.sql`
+      select company_id, model, input_tokens, output_tokens, success from ai_usage where kind = 'photo_describe' order by success desc, input_tokens desc`;
+    expect(rows).toEqual([
+      { company_id: null, model: "claude-sonnet-5-5", input_tokens: 900, output_tokens: 80, success: true },
+      { company_id: null, model: "claude-sonnet-5-5", input_tokens: 900, output_tokens: 80, success: false },
+      { company_id: null, model: expect.any(String), input_tokens: 0, output_tokens: 0, success: false },
+    ]);
+  });
+
   it("관리자 쿠키가 없으면 401이다", async () => {
     expect((await describeAll("")).status).toBe(401);
   });

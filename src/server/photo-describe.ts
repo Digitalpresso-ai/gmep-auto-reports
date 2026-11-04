@@ -1,8 +1,9 @@
 import "server-only";
-import { callModel } from "./ai";
+import { callModel, type ModelResult } from "./ai";
 import { db } from "./db";
 import { aiModel } from "./settings";
 import { getObject } from "./storage";
+import { recordUsage } from "./usage";
 
 // 관리자가 올린 공통 사진을 한 장씩 AI로 설명한다(PHOTO-1). 설명은 보고서 본문에 쓰지 않고 사진 배치(PHOTO-2)에만 쓴다.
 // 사람 이름을 추정하지 않게 하고, 화면·슬라이드·간판의 글자는 그대로 옮겨 어느 세션 사진인지 맞출 단서로 쓴다.
@@ -26,8 +27,8 @@ export function describeText(v: { scene?: unknown; activity?: unknown; visible_t
 
 // 프롬프트 캐싱은 쓰지 않는다. 사진마다 같은 부분은 이 지시문(수백 토큰)뿐이라 캐시 최소 길이(512토큰)에 못 미치고,
 // 입력의 대부분인 사진은 장마다 달라 캐시할 수 없다(AI-13).
-export async function describeImage(model: string, bytes: Uint8Array, mediaType: "image/jpeg" | "image/png"): Promise<string> {
-  const res = await callModel({
+function requestDescription(model: string, bytes: Uint8Array, mediaType: "image/jpeg" | "image/png"): Promise<ModelResult> {
+  return callModel({
     model,
     prompt: PROMPT,
     images: [{ mediaType, base64: Buffer.from(bytes).toString("base64") }],
@@ -35,12 +36,39 @@ export async function describeImage(model: string, bytes: Uint8Array, mediaType:
     maxTokens: 2_000,
     effort: "low",
   });
-  return describeText(JSON.parse(res.text));
 }
 
+/** DB에 기록하지 않는다. 평가 스크립트(scripts/eval)가 운영 DB 없이 쓴다. */
+export async function describeImage(model: string, bytes: Uint8Array, mediaType: "image/jpeg" | "image/png"): Promise<string> {
+  return describeText(JSON.parse((await requestDescription(model, bytes, mediaType)).text));
+}
+
+// 공통 사진은 어느 회사의 것도 아니므로 사용량을 회사 없이 기록한다. 실패한 호출도 기록한다(AI-12).
 async function describeRow(model: string, r: { id: string; storage_path: string }): Promise<boolean> {
   try {
-    const description = await describeImage(model, await getObject(r.storage_path), r.storage_path.endsWith(".png") ? "image/png" : "image/jpeg");
+    const bytes = await getObject(r.storage_path);
+    let res: ModelResult;
+    try {
+      res = await requestDescription(model, bytes, r.storage_path.endsWith(".png") ? "image/png" : "image/jpeg");
+    } catch (e) {
+      await recordUsage({ companyId: null, kind: "photo_describe", model, inputTokens: 0, outputTokens: 0, success: false });
+      throw e;
+    }
+    let description: string | null = null;
+    try {
+      description = describeText(JSON.parse(res.text));
+    } finally {
+      await recordUsage({
+        companyId: null,
+        kind: "photo_describe",
+        model: res.model,
+        inputTokens: res.inputTokens,
+        outputTokens: res.outputTokens,
+        cacheReadTokens: res.cacheReadTokens,
+        cacheWriteTokens: res.cacheWriteTokens,
+        success: description !== null,
+      });
+    }
     await db()`update shared_files set description = ${description} where id = ${r.id} and description is null`;
     return true;
   } catch (e) {
