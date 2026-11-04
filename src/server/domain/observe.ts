@@ -37,8 +37,11 @@ const pastDa = (w: string) => {
 };
 // "~임"은 규칙상 서술형이지만 클레임·프레임·주임처럼 '임'으로 끝나는 명사가 많아 목록으로 다 막을 수 없다. 오판은 고치는 턴을 늘리므로
 // 기계 검사에서는 빼고 프롬프트 규칙과 품질 채점에 맡긴다(2026-11-04 실제 자료 평가·독립 리뷰).
-const NOMINAL_ENDING = /(함|음|됨)$/;
-// 음·함으로 끝나지만 명사인 낱말. 보고서에 흔히 나오는 것만 둔다.
+const NOMINAL_ENDING = /(음|됨)$/;
+// "~함" 종결은 "확인함·검토함·미흡함"처럼 세 글자 이상이거나 "해야 함"처럼 떨어져 쓴다. "결함·직함·명함·포함"처럼 두 글자 낱말은 명사로 본다.
+// 목록으로 명사를 막으면 끝이 없어(독립 리뷰 v3) 음절 수로 가른다. 두 글자 형용사형("강함")은 놓치지만 품질 채점이 본다.
+const narrativeHam = (w: string) => w.endsWith("함") && (w === "함" || Array.from(w).length >= 3);
+// 음·함으로 끝나지만 명사인 낱말(세 글자 이상이거나 음으로 끝나는 것). 보고서에 흔히 나오는 것만 둔다.
 const NOUNS = new Set(["포함", "다음", "처음", "마음", "모음", "녹음", "발음", "소음", "믿음", "이음", "걸음", "웃음"]);
 // "첫걸음"처럼 예외 명사로 끝나는 합성어도 명사이므로 낱말 끝으로 비교한다.
 const isNoun = (w: string) => [...NOUNS].some((n) => w.endsWith(n));
@@ -50,6 +53,7 @@ function narrativeEnding(text: string): string | null {
   const last = text.replace(/[^\p{L}\p{N}]+$/u, "").split(/\s+/).pop() ?? "";
   if (!last) return null;
   if (DA_ENDING.test(last) || pastDa(last)) return last;
+  if (narrativeHam(last) && !isNoun(last)) return last;
   if (NOMINAL_ENDING.test(last) && !isNoun(last)) return last;
   return null;
 }
@@ -92,8 +96,13 @@ function photoKeysOf(html: string): string[] | null {
   return attr == null ? null : attr.split(/\s+/).filter(Boolean);
 }
 
-export function finalChecks(t: ReportTemplate, doc: BlockDoc, photoKeys: string[]): string[] {
-  const out = missingSections(t, doc).map((h) => `필수 섹션이 없습니다: ${h}`);
+/**
+ * changed를 주면 수정 검사다. 이번 실행에서 바뀐 블록만 규칙을 보고, 빠진 필수 섹션은 알리지 않는다.
+ * 요청 밖 블록(회사가 직접 쓴 문장 포함)을 고치라고 돌려주면 요청한 부분만 바꾼다는 규칙과 부딪친다.
+ */
+export function finalChecks(t: ReportTemplate, doc: BlockDoc, photoKeys: string[], opts: { changed?: Set<string> } = {}): string[] {
+  const touched = (id: string) => !opts.changed || opts.changed.has(id);
+  const out = opts.changed ? [] : missingSections(t, doc).map((h) => `필수 섹션이 없습니다: ${h}`);
 
   const where = new Map<number, string[]>();
   for (const b of doc.blocks) {
@@ -103,10 +112,10 @@ export function finalChecks(t: ReportTemplate, doc: BlockDoc, photoKeys: string[
     }
   }
   for (const [no, ids] of [...where].sort((a, b) => a[0] - b[0])) {
-    if (ids.length > 1) out.push(`사진 ${no}이(가) 여러 사진 자리(${ids.join(", ")})에 있습니다. 한 자리에만 둘 것.`);
+    if (ids.length > 1 && ids.some(touched)) out.push(`사진 ${no}이(가) 여러 사진 자리(${ids.join(", ")})에 있습니다. 한 자리에만 둘 것.`);
   }
 
-  const rule = doc.blocks.flatMap((b) => checkBlock(b.html).map((s) => `[${b.id}] ${s}`));
+  const rule = doc.blocks.filter((b) => touched(b.id)).flatMap((b) => checkBlock(b.html).map((s) => `[${b.id}] ${s}`));
   out.push(...rule.slice(0, FINAL_MAX));
   if (rule.length > FINAL_MAX) out.push(`규칙 위반 외 ${rule.length - FINAL_MAX}건이 더 있습니다. 위 항목을 고친 뒤 다시 확인.`);
   return out;

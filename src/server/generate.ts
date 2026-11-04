@@ -253,6 +253,7 @@ export async function reviseReport(companyId: string, date: string, request: str
     let r: AgentResult;
     try {
       r = await runReportAgent({
+        mode: "revise",
         model,
         // 생성 입력과 양식만으로 만든 캐시 prefix. 수정 요청·현재 문서는 followUp(캐시 밖)에만 둔다.
         prompt: buildAgentPrompt(g.input, GMEP_DAILY),

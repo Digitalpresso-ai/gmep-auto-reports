@@ -27,6 +27,8 @@ export type AgentResult =
   | { ok: false; reason: AgentFailure; usages: TurnUsage[] };
 
 export type AgentOptions = {
+  /** 생성은 양식 대비 계획·필수 섹션 검사와 나머지 사진 섹션을 붙인다. 수정은 이번에 바뀐 블록만 검사하고 섹션을 더하지 않는다. */
+  mode: "generate" | "revise";
   model: string;
   prompt: string;
   followUp?: string;
@@ -98,6 +100,12 @@ const result = (id: string, content: string, isError = false): Anthropic.Beta.Be
 });
 
 const issueText = (list: string[]) => `다음 문제를 고친 뒤 finish를 다시 호출하세요.\n${list.map((x) => `- ${x}`).join("\n")}`;
+
+/** 시작 문서와 비교해 새로 생기거나 html이 바뀐 블록 id. 지운 블록은 검사할 내용이 없어 넣지 않는다. */
+function changedIds(start: BlockDoc, now: BlockDoc): Set<string> {
+  const before = new Map(start.blocks.map((b) => [b.id, b.html]));
+  return new Set(now.blocks.filter((b) => before.get(b.id) !== b.html).map((b) => b.id));
+}
 
 export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
   const started = Date.now();
@@ -172,7 +180,7 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
     const blocks: Anthropic.Beta.BetaContentBlockParam[] = [];
     let issues: string[] | null = null;
     const check = () => {
-      const list = finalChecks(o.template, s.doc, o.photoKeys);
+      const list = finalChecks(o.template, s.doc, o.photoKeys, o.mode === "revise" ? { changed: changedIds(o.doc, s.doc) } : {});
       if (list.length) o.onEvent({ type: "issues", list });
       return list;
     };
@@ -180,7 +188,7 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
       if (c.kind === "invalid") blocks.push(result(c.id, c.error, true));
       else if (c.kind === "plan") {
         // 수정 계획은 섹션 이름이 아니라 바꿀 블록 id를 적으므로(agent.ts buildAgentRevision) 양식 대비 섹션 검사는 생성에만 한다
-        const list = o.doc.blocks.length ? [] : planIssues(o.template, c.sections);
+        const list = o.mode === "generate" ? planIssues(o.template, c.sections) : [];
         blocks.push(result(c.id, list.length ? `계획에 문제가 있습니다.\n${list.map((x) => `- ${x}`).join("\n")}` : "ok"));
       } else if (c.kind === "finish") {
         issues = check();
@@ -222,7 +230,7 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
   const out = final.outcome;
   if (!out || !out.ok) return { ok: false, reason: out?.reason ?? "ai_failed", usages: final.usages };
   // 나머지 사진 자리는 빈 문서에서 만든 생성 결과에만 붙인다. 수정은 회사가 지운 "참여 사진" 섹션을 요청 없이 되살리면 안 되므로 그대로 둔다.
-  const doc = o.doc.blocks.length === 0 ? withRestPhotos(o.template, final.doc) : final.doc;
+  const doc = o.mode === "generate" ? withRestPhotos(o.template, final.doc) : final.doc;
   return {
     ok: true,
     html: renderDoc(doc),

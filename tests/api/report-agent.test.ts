@@ -221,7 +221,7 @@ async function run(scripts: Script[], over: Partial<Parameters<typeof import("@/
   model.scripts = scripts;
   model.requests = [];
   const events: Record<string, unknown>[] = [];
-  const result = await runReportAgent({ model: "claude-sonnet-5-5", prompt: "P", images: [], template, photoKeys: [], doc: empty, onEvent: (e) => events.push(e), ...over });
+  const result = await runReportAgent({ model: "claude-sonnet-5-5", prompt: "P", images: [], template, photoKeys: [], doc: empty, mode: "generate", onEvent: (e) => events.push(e), ...over });
   return { result, events, requests: model.requests };
 }
 
@@ -361,7 +361,7 @@ describe("runReportAgent", () => {
   // Codex 독립 리뷰(v2)에서 재현: 블록은 tool_use가 끝날 때 바로 적용되므로 잘리거나 거절된 턴의 블록이 이미 화면에 나가 있다
   it.each(["max_tokens", "refusal"])("%s이면 그 턴에 적용한 블록을 되돌리는 reset 이벤트를 보낸다", async (stopReason) => {
     const doc: BlockDoc = { blocks: [{ id: "b1", html: "<p>원래</p>" }] };
-    const { events } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b1", text: "고침" })], stopReason }], { doc, followUp: "고쳐 줘" });
+    const { events } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b1", text: "고침" })], stopReason }], { doc, mode: "revise", followUp: "고쳐 줘" });
     expect(events.at(-1)).toEqual({ type: "reset", html: "<p>원래</p>" });
   });
 
@@ -372,7 +372,7 @@ describe("runReportAgent", () => {
         { blocks: [plan("p", ["b1"])], stopReason: "tool_use" },
         { blocks: [finish("f")], stopReason: "tool_use" },
       ],
-      { doc, followUp: "고쳐 줘" },
+      { doc, mode: "revise", followUp: "고쳐 줘" },
     );
     expect(toolResults(requests[1].turns[1])[0].content).toBe("ok");
   });
@@ -423,7 +423,7 @@ describe("runReportAgent", () => {
 
   it("수정은 기존 문서에서 시작해 바뀐 블록만 고친다", async () => {
     const doc: BlockDoc = { blocks: [{ id: "b1", html: "<h1>제목</h1>" }, { id: "b2", html: "<p>원래</p>" }] };
-    const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, followUp: "고쳐 줘" });
+    const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, mode: "revise", followUp: "고쳐 줘" });
     expect(result).toMatchObject({ ok: true, html: "<h1>제목</h1><p>고침</p>" });
   });
 
@@ -433,9 +433,30 @@ describe("runReportAgent", () => {
     expect(result.ok && result.html).toContain('<div class="photos"></div>');
   });
 
+  // Codex 독립 리뷰(v3)에서 재현: 생성·수정을 시작 문서가 비었는지로 구분하면 빈 보고서 수정이 생성으로 처리된다
+  it("빈 문서라도 수정이면 계획에 섹션 검사를 하지 않고 나머지 사진 섹션을 붙이지 않는다", async () => {
+    const { result, requests } = await run(
+      [
+        { blocks: [plan("p", ["b1"]), para("a", "가")], stopReason: "tool_use" },
+        { blocks: [finish("f")], stopReason: "tool_use" },
+      ],
+      { mode: "revise", followUp: "고쳐 줘", template: GMEP_DAILY },
+    );
+    expect(toolResults(requests[1].turns[1])[0].content).toBe("ok");
+    expect(result).toMatchObject({ ok: true, html: "<p>가</p>" });
+  });
+
+  it("수정의 마침 검사는 이번 실행에서 바뀐 블록만 보게 한다", async () => {
+    const finalChecks = vi.fn<(...args: unknown[]) => string[]>(() => []);
+    observe.finalChecks = finalChecks;
+    const doc: BlockDoc = { blocks: [{ id: "b1", html: "<p>회사가 쓴 문장</p>" }, { id: "b2", html: "<p>원래</p>" }] };
+    await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, mode: "revise", followUp: "고쳐 줘" });
+    expect(finalChecks.mock.calls[0][3]).toEqual({ changed: new Set(["b2"]) });
+  });
+
   it("회사가 나머지 사진 섹션을 지운 문서를 고치면 그 섹션을 다시 만들지 않는다", async () => {
     const doc: BlockDoc = { blocks: [{ id: "b1", html: "<h2>1. 기본 정보</h2>" }, { id: "b2", html: "<p>원래</p>" }] };
-    const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, followUp: "고쳐 줘", template: GMEP_DAILY });
+    const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, mode: "revise", followUp: "고쳐 줘", template: GMEP_DAILY });
     expect(result).toMatchObject({ ok: true, html: "<h2>1. 기본 정보</h2><p>고침</p>" });
   });
 });

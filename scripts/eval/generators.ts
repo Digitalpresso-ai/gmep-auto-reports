@@ -116,10 +116,12 @@ export const jsonGenerator: Generator = {
 // src/server/report-agent.ts의 ReAct 루프를 그대로 돌린다. 이벤트마다 시작 기준 ms를 남겨 화면에 블록이 보이는 시점을 잰다.
 // 이후 턴의 5분 캐시 쓰기도 costUsd에서는 1시간 단가로 계산되므로 비용은 실제보다 조금 크게 나온다.
 async function callBlocks(i: GenerateInput, doc: BlockDoc, followUp?: string): Promise<GenOutput> {
+  const mode = followUp === undefined ? "generate" : "revise";
   const started = Date.now();
   const prompt = buildAgentPrompt(i.promptInput, GMEP_DAILY);
   const events: (AgentEvent & { ms: number })[] = [];
   const r = await runReportAgent({
+    mode,
     model: i.model,
     prompt,
     followUp,

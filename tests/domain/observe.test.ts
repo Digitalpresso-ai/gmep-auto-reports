@@ -24,6 +24,12 @@ describe("checkBlock", () => {
     for (const t of ["일정을 확인함", "수요가 있음"]) expect(checkBlock(ul(t)).join(), t).toContain("서술형");
   });
 
+  // Codex 독립 리뷰(v3)에서 재현: 두 글자 '~함' 명사
+  it("두 글자 '함' 명사는 통과시키고, 세 글자 이상 '~함'과 떨어진 '함'은 서술형으로 본다", () => {
+    expect(checkBlock(ul("제품 결함", "담당자 직함", "교환한 명함", "통계 포함"))).toEqual([]);
+    for (const t of ["일정을 확인함", "대응이 미흡함", "현지화를 검토해야 함"]) expect(checkBlock(ul(t)).join(), t).toContain("서술형");
+  });
+
   // '임'으로 끝나는 외래어·직함(클레임, 프레임, 주임…)은 목록으로 다 막을 수 없어 기계 검사에서 뺀다. "~임" 종결은 프롬프트 규칙과 품질 채점이 맡는다.
   it("'임'으로 끝나는 낱말은 서술형으로 보지 않는다", () => {
     expect(checkBlock(ul("고객 클레임", "핵심 고객임", "신규 아이템 스킴"))).toEqual([]);
@@ -108,6 +114,13 @@ describe("finalChecks", () => {
     expect(issues.some((s) => s.includes("사진 3") && s.includes("b4") && s.includes("b5"))).toBe(true);
     expect(issues.some((s) => s.includes("사진 1"))).toBe(false);
     expect(issues.some((s) => s.includes("b3") && s.includes("서술형"))).toBe(true);
+  });
+
+  it("수정에서는 바뀐 블록만 검사하고 빠진 필수 섹션은 알리지 않는다", () => {
+    const doc = parseBlocks("<p>회사가 쓴 문장을 확인함</p><p>새로 쓴 문장을 검토함</p>");
+    const issues = finalChecks(GMEP_DAILY, doc, [], { changed: new Set(["b2"]) });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("[b2]");
   });
 
   it("규칙 위반이 10개를 넘으면 10개만 보이고 나머지 건수를 알린다", () => {
