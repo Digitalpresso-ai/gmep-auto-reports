@@ -1,12 +1,17 @@
 // 라운드 결과를 지시서 기준(p.2~3 작성 규칙·보고서 항목, p.5 검수 기준)으로 채점한다. 라운드 간 비교를 위해 채점 모델·문구를 고정한다.
 // 채점은 서비스 API 키가 아니라 로그인한 Claude Code 구독으로 `claude -p`를 불러 한다. 서비스 API 키는 실제 생성 경로(Sonnet)에만 쓴다.
-// 실행: EVAL_ROUND=r1 npx vitest run --config scripts/eval/vitest.config.ts scripts/eval/judge.eval.ts
+// 실행: EVAL_ROUND=b1 npx vitest run --config scripts/eval/vitest.config.ts scripts/eval/judge.eval.ts
+// 환경변수: EVAL_JUDGE_TRIES(실행 폴더마다 채점 횟수, 기본 2) EVAL_JUDGE_MODEL(기본 opus) EVAL_JUDGE_OUT(결과 파일 이름, 기본 judge-cc.json)
+// <ROUND>/run-*/가 있으면 각각 채점하고 <ROUND>/summary.json의 judge에 총점·기준별 평균±표준편차를 합친다. run-*가 없는 예전 라운드는 <ROUND>/를 채점한다.
+// 예전 라운드(meta에 mode 없음)는 보고서 JSON을, 새 라운드는 생성 방식과 상관없이 같은 형식으로 비교하려고 보고서 HTML을 채점한다.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { it } from "vitest";
+import { htmlWithPhotoNumbers } from "@/server/domain/prompt";
 import { OUT_ROOT } from "./fixture";
+import { summarizeJudges, type JudgeResult } from "./summary";
 
 const ROUND = process.env.EVAL_ROUND ?? "r0";
 // 같은 결과를 여러 번 채점해 평균을 낸다(채점 편차 확인용)
@@ -70,14 +75,25 @@ function claudeJudge(prompt: string): Promise<{ scores: Record<string, { score: 
   });
 }
 
-it(`채점 ${ROUND}`, async () => {
-  const dir = path.join(OUT_ROOT, ROUND);
+function runDirs(roundDir: string): string[] {
+  const runs = fs.existsSync(roundDir) ? fs.readdirSync(roundDir).filter((f) => /^run-\d+$/.test(f)) : [];
+  return runs.length ? runs.sort((a, b) => Number(a.slice(4)) - Number(b.slice(4))).map((f) => path.join(roundDir, f)) : [roundDir];
+}
+
+function judgePrompt(dir: string): string | null {
   const read = (f: string) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8") : "");
+  const meta = read("meta.json") ? JSON.parse(read("meta.json")) : {};
+  const html = read("report.html");
+  const report = meta.mode
+    ? html && { label: "보고서 HTML — [사진 N]은 그 자리에 놓인 사진 번호", body: htmlWithPhotoNumbers(html, meta.photoKeys ?? []) }
+    : read("report.json") && { label: "보고서 JSON", body: read("report.json") };
+  // 파싱 실패로 보고서가 없는 실행은 채점하지 않는다(meta.parseOk로 따로 집계된다)
+  if (!report) return null;
   const placement = read("placement.json");
   // 생성 프롬프트의 작성 규칙은 라운드마다 바뀌므로 채점에는 넘기지 않는다. 기준은 지시서(CRITERIA)뿐이고, 자료 부분만 잘라 넘긴다.
   const full = read("prompt.txt");
   const sources = full.slice(full.indexOf("[회사 정보]"), full.lastIndexOf("[출력]")).trim();
-  const prompt = `당신은 정부지원사업 전담기관의 출장보고서 검토자입니다. 아래 [입력 자료]만을 근거로 AI가 만든 [보고서]를 채점하세요.
+  return `당신은 정부지원사업 전담기관의 출장보고서 검토자입니다. 아래 [입력 자료]만을 근거로 AI가 만든 [보고서]를 채점하세요.
 각 기준은 1~5점(5=그대로 제출 가능, 3=손볼 곳 여러 개, 1=사용 불가). 근거 없는 칭찬 없이, 감점 이유를 보고서 문장 인용으로 적으세요.
 채점 기준은 아래 [채점 기준]뿐입니다. 기준에 없는 형식 취향(항목 길이, 나열 개수 등)으로 감점하지 마세요.
 violations에는 입력 자료에 없는 사실·서술형 어미·잘못된 사진 배치를 인용과 함께 적으세요. improvements에는 보고서를 더 좋게 만들 구체적 개선점을 우선순위 순으로 적으세요.
@@ -88,17 +104,35 @@ ${Object.entries(CRITERIA).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 [입력 자료 — 회사 정보·보고 일자·기안문·일정·교육자료·특이사항·사진 설명]
 ${sources}
 
-[보고서 JSON]
-${read("report.json")}
+[${report.label}]
+${report.body}
 
 [사진 배치 — 사진 번호·사진 설명·배치된 위치]
 ${placement || "(배치 정보 없음: 모든 사진이 마지막 '참여 사진' 절에 나열됨)"}`;
+}
 
-  const runs = await Promise.all(Array.from({ length: TRIES }, () => claudeJudge(prompt)));
+it(`채점 ${ROUND}`, async () => {
+  const roundDir = path.join(OUT_ROOT, ROUND);
   const keys = Object.keys(CRITERIA);
-  const mean = Object.fromEntries(keys.map((k) => [k, runs.reduce((n, r) => n + r.scores[k].score, 0) / runs.length]));
-  const total = Object.values(mean).reduce((n, v) => n + v, 0);
-  const perRun = runs.map((r) => keys.reduce((n, k) => n + r.scores[k].score, 0));
-  fs.writeFileSync(path.join(dir, process.env.EVAL_JUDGE_OUT ?? "judge-cc.json"), JSON.stringify({ total, perRun, mean, runs }, null, 1));
-  console.log(ROUND, "평균 총점", total, "회차별", perRun, mean);
+  const results: JudgeResult[] = [];
+  const skipped: string[] = [];
+  for (const dir of runDirs(roundDir)) {
+    const prompt = judgePrompt(dir);
+    if (!prompt) {
+      skipped.push(path.basename(dir));
+      continue;
+    }
+    const runs = await Promise.all(Array.from({ length: TRIES }, () => claudeJudge(prompt)));
+    const mean = Object.fromEntries(keys.map((k) => [k, runs.reduce((n, r) => n + r.scores[k].score, 0) / runs.length]));
+    const total = Object.values(mean).reduce((n, v) => n + v, 0);
+    const perRun = runs.map((r) => keys.reduce((n, k) => n + r.scores[k].score, 0));
+    fs.writeFileSync(path.join(dir, process.env.EVAL_JUDGE_OUT ?? "judge-cc.json"), JSON.stringify({ total, perRun, mean, runs }, null, 1));
+    results.push({ total, perRun, mean });
+    console.log(ROUND, path.relative(roundDir, dir) || ".", "평균 총점", total, "회차별", perRun, mean);
+  }
+  const summaryFile = path.join(roundDir, "summary.json");
+  const summary = fs.existsSync(summaryFile) ? JSON.parse(fs.readFileSync(summaryFile, "utf8")) : { round: ROUND };
+  summary.judge = { model: JUDGE_MODEL, tries: TRIES, skipped, ...summarizeJudges(results) };
+  fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 1));
+  console.log(ROUND, "채점 요약", JSON.stringify(summary.judge));
 });
