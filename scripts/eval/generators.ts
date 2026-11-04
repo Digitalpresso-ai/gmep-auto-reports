@@ -3,6 +3,10 @@
 import { callModel, type ModelRequest } from "@/server/ai";
 import { buildPrompt, buildRevisionFollowUp, htmlWithPhotoNumbers, type PromptInput } from "@/server/domain/prompt";
 import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, type Report } from "@/server/domain/report";
+import { buildAgentPrompt, buildAgentRevision } from "@/server/domain/agent";
+import { numberedForModel, parseBlocks, type BlockDoc } from "@/server/domain/blocks";
+import { GMEP_DAILY } from "@/server/domain/template";
+import { runReportAgent, type AgentEvent } from "@/server/report-agent";
 import { addUsage, costUsd, type Usage } from "./summary";
 
 export type Mode = "json" | "blocks";
@@ -109,7 +113,68 @@ export const jsonGenerator: Generator = {
     ),
 };
 
+// src/server/report-agent.ts의 ReAct 루프를 그대로 돌린다. 이벤트마다 시작 기준 ms를 남겨 화면에 블록이 보이는 시점을 잰다.
+// 이후 턴의 5분 캐시 쓰기도 costUsd에서는 1시간 단가로 계산되므로 비용은 실제보다 조금 크게 나온다.
+async function callBlocks(i: GenerateInput, doc: BlockDoc, followUp?: string): Promise<GenOutput> {
+  const started = Date.now();
+  const prompt = buildAgentPrompt(i.promptInput, GMEP_DAILY);
+  const events: (AgentEvent & { ms: number })[] = [];
+  const r = await runReportAgent({
+    model: i.model,
+    prompt,
+    followUp,
+    images: i.scheduleImages,
+    template: GMEP_DAILY,
+    photoKeys: i.photoKeys,
+    doc,
+    onEvent: (e) => events.push({ ...e, ms: Date.now() - started }),
+  });
+  const detail: GenMeta["attemptsDetail"] = r.usages.map((u) => ({
+    inputTokens: u.input,
+    outputTokens: u.output,
+    cacheReadTokens: u.cacheRead,
+    cacheWriteTokens: u.cacheWrite,
+    latencyMs: u.latencyMs,
+    stopReason: null,
+    parseOk: true,
+  }));
+  const usage = detail.reduce<Usage>((u, d) => addUsage(u, d), ZERO);
+  const firstBlock = events.find((e) => e.type === "block");
+  return {
+    html: r.ok ? r.html : "",
+    report: null,
+    files: {
+      "prompt.txt": prompt + (followUp ?? ""),
+      "events.ndjson": events.map((e) => JSON.stringify(e)).join("\n"),
+      "result.json": JSON.stringify(r.ok ? { ...r, html: undefined } : r, null, 1),
+    },
+    meta: {
+      mode: "blocks",
+      model: r.usages.at(-1)?.model ?? i.model,
+      stopReason: r.ok ? "finish" : r.reason,
+      ...usage,
+      latencyMs: Date.now() - started,
+      costUsd: costUsd(usage),
+      attempts: 1,
+      parseOk: r.ok,
+      firstBlockMs: firstBlock?.ms ?? null,
+      turns: r.usages.length,
+      attemptsDetail: detail,
+    },
+  };
+}
+
+export const blocksGenerator: Generator = {
+  mode: "blocks",
+  generate: (i) => callBlocks(i, { blocks: [] }),
+  revise: (i) => {
+    const doc = parseBlocks(i.currentHtml);
+    return callBlocks(i, doc, buildAgentRevision({ numberedDoc: numberedForModel(doc, i.photoKeys), previousRequests: i.previousRequests, request: i.request }));
+  },
+};
+
 export function pickGenerator(mode = process.env.EVAL_MODE ?? "json"): Generator {
   if (mode === "json") return jsonGenerator;
-  throw new Error(`EVAL_MODE=${mode} 생성기가 아직 없다(json만 있음)`);
+  if (mode === "blocks") return blocksGenerator;
+  throw new Error(`EVAL_MODE=${mode} 생성기가 없다(json, blocks)`);
 }
