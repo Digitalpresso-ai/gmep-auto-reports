@@ -229,6 +229,8 @@ export function Workspace({ profile }: { profile: Profile }) {
 
   // 생성과 AI 수정은 서버가 회사별로 하나만 받으므로 둘 중 하나가 도는 동안 입력을 막는다
   const aiBusy = generating || revising;
+  // 사진 업로드는 시작할 때의 날짜와 선택으로 끝난 뒤 화면을 다시 그린다. 그동안 날짜 이동·사진 선택·삭제를 막아 다른 날짜 화면에 섞이거나 선택이 덮어써지지 않게 한다.
+  const photoBusy = aiBusy || Boolean(uploading);
 
   useEffect(() => {
     if (!aiBusy) return;
@@ -315,6 +317,11 @@ export function Workspace({ profile }: { profile: Profile }) {
       setSelected(v.selectedPhotos);
     } catch (e) {
       setStatus({ kind: "err", text: errorText(e) });
+      // 서버가 DB에서 지운 뒤 Storage 삭제에서 실패할 수 있다. 화면에 지워진 사진이 남지 않게 다시 불러온다.
+      api<DayView>(`/api/days/${date}`).then(
+        (v) => (setDay(v), setSelected(v.selectedPhotos)),
+        () => {},
+      );
     }
   }
 
@@ -471,7 +478,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       {stage === "input" ? (
         <section className="ws-input" aria-busy={busy}>
           <div className="ws-head">
-            <input className="input ws-date" type="date" value={date} disabled={aiBusy} aria-label="보고 일자" onChange={(e) => changeDate(e.target.value)} />
+            <input className="input ws-date" type="date" value={date} disabled={photoBusy} aria-label="보고 일자" onChange={(e) => changeDate(e.target.value)} />
             {usage && (
               <span className="usage">
                 생성 <b>{usage.generateRemaining}/{usage.generateLimit}</b> · 수정 <b>{usage.reviseRemaining}/{usage.reviseLimit}</b>
@@ -505,7 +512,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                     {r.date === date ? (
                       <span className="chip">보는 중</span>
                     ) : (
-                      <button type="button" className="btn-link" disabled={aiBusy} onClick={() => changeDate(r.date)}>
+                      <button type="button" className="btn-link" disabled={photoBusy} onClick={() => changeDate(r.date)}>
                         열기
                       </button>
                     )}
@@ -602,10 +609,10 @@ export function Workspace({ profile }: { profile: Profile }) {
                     <div className="pbar">
                       <span>{selected.length === 0 ? "넣을 사진을 누르세요. 고른 순서대로 번호가 붙습니다." : "고른 순서대로 보고서에 들어갑니다."}</span>
                       <span className="row">
-                        <button type="button" className="btn-link" onClick={() => selectAll(true)}>
+                        <button type="button" className="btn-link" disabled={photoBusy} onClick={() => selectAll(true)}>
                           모두 선택
                         </button>
-                        <button type="button" className="btn-link" onClick={() => selectAll(false)}>
+                        <button type="button" className="btn-link" disabled={photoBusy} onClick={() => selectAll(false)}>
                           선택 해제
                         </button>
                       </span>
@@ -615,14 +622,14 @@ export function Workspace({ profile }: { profile: Profile }) {
                         const no = order(p);
                         return (
                           <div key={`${p.source}:${p.id}`} style={{ position: "relative" }}>
-                            <button type="button" className={`thumb${no ? " sel" : ""}`} style={{ width: "100%" }} onClick={() => toggle(p)} aria-pressed={no > 0} aria-label={`${p.filename} ${no ? `${no}번째로 선택됨` : "선택"}`}>
+                            <button type="button" className={`thumb${no ? " sel" : ""}`} style={{ width: "100%" }} disabled={photoBusy} onClick={() => toggle(p)} aria-pressed={no > 0} aria-label={`${p.filename} ${no ? `${no}번째로 선택됨` : "선택"}`}>
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img src={p.url} alt="" loading="lazy" />
                               {no ? <span className="no">{no}</span> : <span className="chk" />}
                               {p.source === "company" && <span className="own">내 사진</span>}
                             </button>
                             {p.source === "company" && (
-                              <button type="button" className="thumb-del" aria-label="사진 지우기" onClick={() => removePhoto(p.id)}>
+                              <button type="button" className="thumb-del" aria-label="사진 지우기" disabled={photoBusy} onClick={() => removePhoto(p.id)}>
                                 ✕
                               </button>
                             )}
@@ -682,7 +689,7 @@ export function Workspace({ profile }: { profile: Profile }) {
                     교육자료 분량에 따라 1~3분 걸립니다 · {elapsed}초 · 화면을 닫지 마세요
                   </div>
                 )}
-                <button type="button" className="btn btn-primary btn-block" disabled={aiBusy || limitReached} onClick={startGenerate}>
+                <button type="button" className="btn btn-primary btn-block" disabled={photoBusy || limitReached} onClick={startGenerate}>
                   {generating ? <span className="spin" /> : null}
                   {generating ? "보고서 작성 중…" : report ? "다시 만들기" : "보고서 만들기"}
                 </button>
