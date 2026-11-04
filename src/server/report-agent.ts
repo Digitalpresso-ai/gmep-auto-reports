@@ -39,6 +39,17 @@ export type AgentOptions = {
   signal?: AbortSignal;
 };
 
+// 참가기업 자료는 외부로 보내지 않는다(AGENTS.md). @langchain/core는 실행마다 CallbackManager._configureSync(callbacks/manager.js)에서
+// isTracingEnabled(utils/callbacks.js)로 아래 네 변수 중 하나가 "true"인지 보고 LangSmith 추적기를 붙인다. core에는 이를 끄는 실행 설정이 없고
+// (traceable 컨텍스트의 tracingEnabled만 예외), 판정은 매번 process.env를 읽으므로 변수를 "false"로 덮어쓰는 것이 가장 확실하다.
+// 모듈 로드 때와 실행 직전에 모두 덮어써 로드 뒤에 바뀐 값도 막는다. LANGSMITH_GATEWAY는 core의 provider 연결(utils/gateway.js)이 모델 호출을
+// LangSmith gateway로 돌리는 스위치다. 이 루프의 모델 호출은 ai.ts가 하므로 해당하지 않지만 같은 이유로 끈다. LANGSMITH_ENDPOINT는 추적이 꺼지면 쓰이지 않는다.
+const TRACING_ENV = ["LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING", "LANGSMITH_GATEWAY"];
+function disableTracing() {
+  for (const k of TRACING_ENV) process.env[k] = "false";
+}
+disableTracing();
+
 const MAX_TURNS = 8;
 // Vercel 함수 300초 안에서 저장·응답까지 끝낼 여유를 둔다
 const DEADLINE_MS = 240_000;
@@ -200,6 +211,7 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
   let final: State;
   try {
     // 턴마다 model·tools 두 단계이고, 한도 판정을 위해 model 단계가 한 번 더 돈다
+    disableTracing();
     final = await graph.invoke({ doc: o.doc }, { recursionLimit: maxTurns * 2 + 2 });
   } catch (err) {
     if (err instanceof GraphRecursionError) return { ok: false, reason: "turn_limit", usages: spent };

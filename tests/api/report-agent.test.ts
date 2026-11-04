@@ -1,7 +1,7 @@
 // ReAct 보고서 생성 루프(report-agent.ts)와 그 모델 호출(ai.ts streamModel)의 행동 검사.
 // 실제 Anthropic 호출은 하지 않는다. 앞부분은 SDK 스트림을 가짜로 바꿔 요청 본문과 이벤트 처리를, 뒷부분은 streamModel을 가짜로 바꿔 루프를 본다.
 import type Anthropic from "@anthropic-ai/sdk";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StreamRequest, StreamResult, ToolUseEvent } from "@/server/ai";
 import type { BlockDoc } from "@/server/domain/blocks";
 import { GMEP_DAILY } from "@/server/domain/template";
@@ -421,3 +421,31 @@ describe("runReportAgent", () => {
   });
 });
 
+describe("외부 트레이싱 차단", () => {
+  const keys = ["LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING", "LANGSMITH_GATEWAY", "LANGSMITH_ENDPOINT", "LANGCHAIN_ENDPOINT"];
+  let saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    for (const k of keys.slice(0, 5)) process.env[k] = "true";
+    // 차단이 실패해도 요청이 외부로 나가지 않도록 닫힌 로컬 포트를 가리킨다
+    process.env.LANGSMITH_ENDPOINT = "http://127.0.0.1:9";
+    process.env.LANGCHAIN_ENDPOINT = "http://127.0.0.1:9";
+  });
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("트레이싱 환경변수가 켜져 있어도 report-agent를 불러와 실행하면 LangSmith 추적기가 붙지 않는다", async () => {
+    vi.resetModules();
+    const { result } = await run([{ blocks: [para("a", "가"), finish("f")], stopReason: "tool_use" }]);
+    expect(result.ok).toBe(true);
+    const { CallbackManager } = await import("@langchain/core/callbacks/manager");
+    const handlers = CallbackManager.configure()?.handlers ?? [];
+    expect(handlers.map((h) => h.name)).not.toContain("langchain_tracer");
+    expect(process.env.LANGSMITH_GATEWAY).toBe("false");
+  });
+});
