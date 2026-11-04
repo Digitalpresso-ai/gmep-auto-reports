@@ -207,9 +207,11 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
   }
   const out = final.outcome;
   if (!out || !out.ok) return { ok: false, reason: out?.reason ?? "ai_failed", usages: final.usages };
+  // 나머지 사진 자리는 빈 문서에서 만든 생성 결과에만 붙인다. 수정은 회사가 지운 "참여 사진" 섹션을 요청 없이 되살리면 안 되므로 그대로 둔다.
+  const doc = o.doc.blocks.length === 0 ? withRestPhotos(o.template, final.doc) : final.doc;
   return {
     ok: true,
-    html: renderDoc(withRestPhotos(o.template, final.doc)),
+    html: renderDoc(doc),
     turns: final.n,
     usages: final.usages,
     latencyMs: Date.now() - started,

@@ -407,4 +407,17 @@ describe("runReportAgent", () => {
     const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, followUp: "고쳐 줘" });
     expect(result).toMatchObject({ ok: true, html: "<h1>제목</h1><p>고침</p>" });
   });
+
+  it("빈 문서 생성은 끝날 때 나머지 사진 섹션(제목과 키 없는 사진 자리)을 붙인다", async () => {
+    const { result } = await run([{ blocks: [para("a", "가"), finish("f")], stopReason: "tool_use" }], { template: GMEP_DAILY });
+    expect(result.ok && result.html).toContain("참여 사진");
+    expect(result.ok && result.html).toContain('<div class="photos"></div>');
+  });
+
+  it("회사가 나머지 사진 섹션을 지운 문서를 고치면 그 섹션을 다시 만들지 않는다", async () => {
+    const doc: BlockDoc = { blocks: [{ id: "b1", html: "<h2>1. 기본 정보</h2>" }, { id: "b2", html: "<p>원래</p>" }] };
+    const { result } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, followUp: "고쳐 줘", template: GMEP_DAILY });
+    expect(result).toMatchObject({ ok: true, html: "<h2>1. 기본 정보</h2><p>고침</p>" });
+  });
 });
+
