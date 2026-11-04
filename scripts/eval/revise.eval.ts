@@ -2,7 +2,7 @@
 // 요청마다 지연·토큰·캐시 읽기·비용과 결과 HTML을 남기고, 요청하지 않은 h2 섹션이 바뀌었는지 비교한다.
 // 실행: EVAL_ROUND=b1 EVAL_RUN=run-1 npx vitest run --config scripts/eval/vitest.config.ts scripts/eval/revise.eval.ts
 // 환경변수: EVAL_RUN(기본 run-1, run-*가 없는 예전 라운드는 라운드 폴더) EVAL_MODE(기본 원본 실행의 mode) EVAL_MODEL(기본 운영 기본 모델)
-// 결과: <실행 폴더>/revise/step-1..3/(report.html·meta.json 등), <실행 폴더>/revise/summary.json
+// 결과: <실행 폴더>/revise/step-1..3/(report.html·meta.json 등), <실행 폴더>/revise/summary.json. 원본과 다른 EVAL_MODE면 revise-<mode>/
 // 생성 프롬프트가 원본 실행과 바이트 단위로 같아야 캐시를 읽으므로, 다르면 실행하지 않고 멈춘다.
 import fs from "node:fs";
 import path from "node:path";
@@ -65,7 +65,8 @@ it(`수정 ${ROUND}`, async () => {
     throw new Error("생성 프롬프트가 원본 실행과 달라 캐시를 읽지 못한다. 같은 코드로 생성 평가를 다시 돌린 뒤 수정 평가를 한다");
   const gen = pickGenerator(process.env.EVAL_MODE ?? source.mode ?? "json");
 
-  const outDir = path.join(runDir, "revise");
+  // 원본과 다른 방식으로 고치면 원본 방식의 수정 결과를 덮어쓰지 않게 폴더를 나눈다
+  const outDir = path.join(runDir, gen.mode === (source.mode ?? "json") ? "revise" : `revise-${gen.mode}`);
   fs.rmSync(outDir, { recursive: true, force: true });
   const steps: ReturnType<typeof stepMeta>[] = [];
   const previous: string[] = [];
