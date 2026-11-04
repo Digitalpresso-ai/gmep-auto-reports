@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { hashPassword } from "./auth";
 import { db } from "./db";
 import { displayName, sortForLogin } from "./domain/company-name";
-import { kstToday } from "./domain/dates";
+import { berlinDayStart } from "./domain/dates";
 import type { DailyLimits } from "./domain/usage";
 
 export type CompanyProfile = {
@@ -37,8 +37,8 @@ export async function getCompanyProfile(companyId: string): Promise<CompanyProfi
 // ---------- 관리자 회사 관리(AUTH-9). 보고서·기안문 내용은 넣지 않는다(AUTH-10). ----------
 
 export async function listCompaniesForAdmin() {
-  // 오늘 성공한 생성·수정 횟수는 회사 화면의 남은 횟수와 같은 기준(KST 하루, 성공만)으로 센다(AI-9)
-  const dayStart = new Date(`${kstToday()}T00:00:00+09:00`);
+  // 오늘 성공한 생성·수정 횟수는 회사 화면의 남은 횟수와 같은 기준(독일 시간 하루, 성공만)으로 센다(AI-9)
+  const dayStart = berlinDayStart();
   const rows = await db()<
     {
       id: string;

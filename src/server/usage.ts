@@ -1,19 +1,19 @@
 import "server-only";
 import type { Sql, TransactionSql } from "postgres";
 import { db } from "./db";
-import { kstMonthStart, kstToday } from "./domain/dates";
+import { berlinDayStart, berlinMonthStart } from "./domain/dates";
 import type { UsageCounts } from "./domain/usage";
 
-// 하루 생성·수정 횟수는 성공한 호출만 센다. 실패한 호출도 토큰은 썼으므로 월 토큰 합계에는 넣는다(AI-9, AI-12).
+// 하루 생성·수정 횟수는 독일 시간 자정부터 성공한 호출만 센다. 실패한 호출도 토큰은 썼으므로 월 토큰 합계에는 넣는다(AI-9, AI-12).
 export async function usageCounts(companyId: string, now = new Date()): Promise<UsageCounts> {
-  const dayStart = new Date(`${kstToday(now)}T00:00:00+09:00`);
+  const dayStart = berlinDayStart(now);
   const [row] = await db()<
     { generate_used: number; revise_used: number; month_tokens: string; daily_generate_limit: number; daily_revise_limit: number; monthly_token_limit: string | null }[]
   >`
     select
       (select count(*)::int from ai_usage where company_id = c.id and kind = 'generate' and success and created_at >= ${dayStart}) as generate_used,
       (select count(*)::int from ai_usage where company_id = c.id and kind = 'revise' and success and created_at >= ${dayStart}) as revise_used,
-      (select coalesce(sum(input_tokens + output_tokens), 0) from ai_usage where company_id = c.id and created_at >= ${kstMonthStart(now)}) as month_tokens,
+      (select coalesce(sum(input_tokens + output_tokens), 0) from ai_usage where company_id = c.id and created_at >= ${berlinMonthStart(now)}) as month_tokens,
       c.daily_generate_limit, c.daily_revise_limit, c.monthly_token_limit
     from companies c where c.id = ${companyId}`;
   return {
