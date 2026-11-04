@@ -16,6 +16,15 @@ vi.mock("@/server/ai", async (importOriginal) => ({
   callModel: (r: ModelRequest) => callModel(r),
   streamModel: (r: StreamRequest, onToolUse?: OnToolUse) => streamModel(r, onToolUse),
 }));
+type RunAgent = typeof import("@/server/report-agent").runReportAgent;
+// 루프는 실제로 돌리되, 넘긴 인자를 확인하거나 루프 결과를 직접 주입할 수 있게 감싼다
+const agent = vi.hoisted(() => ({ real: null as RunAgent | null }));
+const runAgent = vi.fn<RunAgent>();
+vi.mock("@/server/report-agent", async (importOriginal) => {
+  const m = await importOriginal<typeof import("@/server/report-agent")>();
+  agent.real = m.runReportAgent;
+  return { ...m, runReportAgent: (o: Parameters<RunAgent>[0]) => runAgent(o) };
+});
 
 let t: TestDb;
 let a: { id: string; cookie: string };
@@ -50,6 +59,8 @@ afterAll(() => t?.stop());
 beforeEach(() => {
   callModel.mockReset();
   streamModel.mockReset();
+  runAgent.mockReset();
+  runAgent.mockImplementation((o) => agent.real!(o));
 });
 
 const generate = async (cookie: string, body: unknown = {}, d = date) =>
@@ -467,5 +478,64 @@ describe("FUNC-10 AI 수정", () => {
     callModel.mockResolvedValueOnce(reply(goodJson));
     expect((await generate(c.cookie, { overwrite: true }, d)).status).toBe(200);
     expect((await (await revisions(c.cookie)).json()).revisions).toEqual([]);
+  });
+
+  describe("저장 형식", () => {
+    const dd = "2026-11-09";
+    let e: { id: string; cookie: string };
+    const stored = async () => (await t.sql<{ body_html: string }[]>`select body_html from reports where company_id = ${e.id} and report_date = ${dd}`)[0].body_html;
+    const quoted = JSON.stringify({
+      title: "처음",
+      schedule: [["09:30", '"온보딩"', "참석"]],
+      achievements: [{ t: '"현지" 거점 확보', sub: ['코워킹 "A" 이용'] }],
+      insights: [{ t: "현지 수요 확인", sub: ["근거: 강연"] }],
+      plans: ['"후속" 미팅 준비'],
+    });
+    /** 블록 하나만 바꾼 기대 문서. */
+    const withBlock = (html: string, id: string, block: string) => renderDoc({ blocks: parseBlocks(html).blocks.map((x) => (x.id === id ? { ...x, html: block } : x)) });
+
+    beforeAll(async () => {
+      const id = await companyWithPassword(t.sql, "주식회사 저장형식", "q-password");
+      e = { id, cookie: await loginCookie(id, "q-password") };
+    });
+
+    it("생성 본문의 따옴표(&quot;)가 있어도 첫 수정에서 요청하지 않은 블록은 바이트 그대로다", async () => {
+      callModel.mockResolvedValueOnce(reply(quoted));
+      expect((await generate(e.cookie, {}, dd)).status).toBe(200);
+      const generated = await stored();
+      expect(generated).toContain("&quot;현지&quot; 거점 확보");
+      const id = blockOf(generated, "현지 수요 확인");
+      streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: { id, ...insightsList("현지 조달 규정 확인") } }, finish]));
+      expect((await revise(e.cookie, { request: "시사점을 더 구체적으로" }, dd)).status).toBe(200);
+      const expected = withBlock(generated, id, "<ul><li><strong>현지 조달 규정 확인</strong><ul><li>근거: 강연 사례</li><li>적용: 제품 문서 현지화</li></ul></li></ul>");
+      expect(await stored()).toBe(expected);
+    });
+
+    it("수정 결과의 새 블록에 스크립트·이벤트 속성이 오면 지운다", async () => {
+      const current = await stored();
+      runAgent.mockImplementationOnce(async () => ({
+        ok: true,
+        html: current + '<p onclick="x()">새 문단<script>alert(1)</script></p><img src=x onerror="y()">',
+        turns: 1,
+        usages: [{ input: 10, output: 5, cacheRead: 0, cacheWrite: 0, model: "claude-sonnet-5-5", latencyMs: 1, firstToolMs: null }],
+        latencyMs: 1,
+        firstBlockMs: null,
+        issues: [],
+      }));
+      expect((await revise(e.cookie, { request: "문단 추가" }, dd)).status).toBe(200);
+      expect(await stored()).toBe(current + "<p>새 문단</p>");
+    });
+
+    it("저장본의 손대지 않은 블록이라도 위험한 태그·속성이 있으면 지운다", async () => {
+      const current = await stored();
+      await t.sql`update reports set body_html = ${current + '<p onclick="x()">더러운 문단<script>alert(1)</script></p>'} where company_id = ${e.id} and report_date = ${dd}`;
+      const id = blockOf(current, "현지 조달 규정 확인");
+      streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: { id, ...insightsList("조달 규정 확인") } }, finish]));
+      expect((await revise(e.cookie, { request: "시사점을 짧게" }, dd)).status).toBe(200);
+      const after = await stored();
+      expect(after).not.toMatch(/onclick|script/);
+      expect(after).toContain("<p>더러운 문단</p>");
+      expect(after).toContain("&quot;현지&quot; 거점 확보");
+    });
   });
 });

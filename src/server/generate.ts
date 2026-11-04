@@ -1,8 +1,9 @@
 import "server-only";
+import { parseDocument } from "htmlparser2";
 import { callModel, ModelStreamError, type ModelRequest } from "./ai";
 import { db } from "./db";
 import { buildAgentPrompt, buildAgentRevision } from "./domain/agent";
-import { numberedForModel, parseBlocks } from "./domain/blocks";
+import { numberedForModel, parseBlocks, type BlockDoc } from "./domain/blocks";
 import { buildPrompt, type Material, type PromptInput } from "./domain/prompt";
 import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, type Report } from "./domain/report";
 import { photoKey } from "@/lib/photo-layout";
@@ -182,6 +183,30 @@ function revisionUsage(companyId: string, fallbackModel: string, usages: TurnUsa
   };
 }
 
+type DomNode = ReturnType<typeof parseDocument>["children"][number];
+/** 태그·속성·풀어 쓴 텍스트만 남긴 구조. 엔티티 표기(&quot; 와 ")만 다른 두 HTML은 같은 값이 된다. */
+function shape(nodes: DomNode[]): unknown[] {
+  return nodes.map((n) =>
+    n.type === "text" ? n.data : n.type === "tag" ? [n.name, Object.entries(n.attribs).sort(), shape(n.children as DomNode[])] : [n.type],
+  );
+}
+const sameShape = (a: string, b: string) => JSON.stringify(shape(parseDocument(a).children)) === JSON.stringify(shape(parseDocument(b).children));
+
+/**
+ * 수정 결과를 저장할 HTML로 만든다. 수정 전과 바이트가 같은 블록은 정리해도 엔티티 표기만 바뀌면 원문을 둔다.
+ * 생성 본문은 따옴표를 &quot;로 저장하고 cleanReportHtml은 "로 바꾸므로, 문서 전체를 정리하면 요청하지 않은 블록도 바이트가 바뀐다.
+ * 정리로 태그·속성이 빠지는 블록(저장본에 남은 위험한 마크업 포함)과 새로 생기거나 바뀐 블록은 정리한 결과를 쓴다.
+ */
+function mergeRevised(before: BlockDoc, html: string): string {
+  const kept = new Set(before.blocks.map((b) => b.html));
+  return parseBlocks(html)
+    .blocks.map((b) => {
+      const clean = cleanReportHtml(b.html);
+      return kept.has(b.html) && sameShape(b.html, clean) ? b.html : clean;
+    })
+    .join("");
+}
+
 /**
  * 저장된 현재 보고서(직접 고친 내용 포함)를 블록으로 나눠 보내고, 이번 요청이 가리키는 블록만 tool로 바꾼다(FUNC-10).
  * 손대지 않은 블록은 원문 바이트 그대로 저장된다. 지난 수정 요청 전체도 함께 보낸다.
@@ -223,7 +248,7 @@ export async function reviseReport(companyId: string, date: string, request: str
       console.error("AI 수정 실패", { companyId, reason: r.reason });
       return { kind: r.reason === "max_tokens" ? "ai_parse_failed" : "ai_failed" };
     }
-    const bodyHtml = cleanReportHtml(r.html);
+    const bodyHtml = mergeRevised(doc, r.html);
     const title = titleOf(bodyHtml);
     const [row] = await sql.begin(async (tx) => {
       const rows = await tx<{ updated_at: Date }[]>`
