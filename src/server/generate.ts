@@ -234,12 +234,15 @@ function mergeRevised(before: BlockDoc, html: string): string {
 export async function reviseReport(companyId: string, date: string, request: string): Promise<ReviseOutcome> {
   const started = Date.now();
   const sql = db();
-  const [current] = await sql<{ id: string; body_html: string }[]>`
-    select id, body_html from reports where company_id = ${companyId} and report_date = ${date}`;
-  if (!current) return { kind: "no_report" };
+  const [exists] = await sql`select 1 from reports where company_id = ${companyId} and report_date = ${date}`;
+  if (!exists) return { kind: "no_report" };
   if (!canRevise(await usageCounts(companyId))) return { kind: "limit_reached" };
   if (!(await reserve(companyId))) return { kind: "in_progress" };
   try {
+    // 진행 기록을 잡은 뒤에 본문을 읽는다. 먼저 읽으면 그 사이 저장된 직접 편집을 AI 결과가 옛 본문으로 덮는다(PUT은 진행 중 409).
+    const [current] = await sql<{ id: string; body_html: string }[]>`
+      select id, body_html from reports where company_id = ${companyId} and report_date = ${date}`;
+    if (!current) return { kind: "no_report" };
     const g = await generationInput(companyId, date);
     const model = await aiModel();
     const previous = await listRevisions(companyId, date);
@@ -285,15 +288,15 @@ export async function reviseReport(companyId: string, date: string, request: str
         const rows = await tx<{ updated_at: Date }[]>`
           update reports set title = ${title}, body_html = ${bodyHtml}, updated_at = now() where id = ${current.id} returning updated_at`;
         await tx`insert into report_revisions (report_id, request) values (${current.id}, ${request})`;
+        await recordUsage(revisionUsage(companyId, model, r.usages, true), tx);
         return rows;
       });
     } catch (e) {
-      // 저장하지 못한 수정은 횟수에서 빼지 않는다. 성공으로 먼저 기록하면 보고서는 그대로인데 횟수만 줄어든다.
+      // 저장·성공 기록 중 하나라도 실패하면 둘 다 되돌린다. 쓴 토큰은 실패로 기록하고 횟수에서는 빼지 않는다.
       await recordUsage(revisionUsage(companyId, model, r.usages, false));
       console.error("AI 수정 저장 실패", { companyId, error: e instanceof Error ? e.message : String(e) });
       return { kind: "ai_failed" };
     }
-    await recordUsage(revisionUsage(companyId, model, r.usages, true));
     return {
       kind: "ok",
       report: { title, bodyHtml, updatedAt: row.updated_at.toISOString() },

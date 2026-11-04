@@ -603,6 +603,43 @@ describe("FUNC-10 AI 수정", () => {
       });
     });
 
+    // Codex 독립 리뷰(v5)에서 재현: 진행 기록을 잡기 전에 본문을 읽으면, 그 사이 저장된 직접 편집을 AI 결과가 옛 본문으로 덮는다.
+    // 진행 기록 insert와 같은 순간에 편집이 들어오는 상황을 트리거로 만든다.
+    it("진행 기록을 잡는 순간까지 저장된 직접 편집은 AI 수정 뒤에도 남는다", async () => {
+      await t.sql.unsafe(`create function edit_on_reserve() returns trigger language plpgsql as $$
+        begin update reports set body_html = body_html || '<p>잠금 직전 편집</p>' where company_id = new.company_id; return new; end $$`);
+      await t.sql.unsafe("create trigger edit_on_reserve after insert on ai_inflight for each row execute function edit_on_reserve()");
+      try {
+        const id = blockOf(await stored(), "조달 규정 확인");
+        // 뒤 테스트가 같은 블록을 찾으므로 "조달 규정 확인" 문구를 남긴다
+        streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: { id, ...insightsList("조달 규정 확인 우선") } }, finish]));
+        const res = await revise(e.cookie, { request: "경합 확인" }, dd);
+        expect(res.status).toBe(200);
+        expect(await stored()).toContain("<p>잠금 직전 편집</p>");
+      } finally {
+        await t.sql.unsafe("drop trigger edit_on_reserve on ai_inflight; drop function edit_on_reserve()");
+      }
+    });
+
+    // Codex 독립 리뷰(v5)에서 재현: 성공 사용량을 저장 트랜잭션 밖에서 기록하면, 그 기록만 실패할 때 수정은 반영되고 횟수는 안 센다.
+    it("성공 사용량을 기록하지 못하면 수정도 저장하지 않고 쓴 토큰은 실패로 기록한다", async () => {
+      await t.sql.unsafe(`create function fail_usage() returns trigger language plpgsql as $$
+        begin if new.kind = 'revise' and new.success then raise exception 'boom'; end if; return new; end $$`);
+      await t.sql.unsafe("create trigger fail_usage before insert on ai_usage for each row execute function fail_usage()");
+      try {
+        const kept = await stored();
+        const id = blockOf(kept, "조달 규정 확인");
+        streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: { id, ...insightsList("규정 확인") } }, finish], { usage: { input: 20_000, output: 200 } }));
+        const res = await revise(e.cookie, { request: "기록 실패" }, dd);
+        expect(res.status).toBe(502);
+        expect(await stored()).toBe(kept);
+        expect((await (await revisions(e.cookie, dd)).json()).revisions.map((r: { request: string }) => r.request)).not.toContain("기록 실패");
+        expect((await usageRows(e.id)).at(-1)).toEqual({ kind: "revise", success: false, input_tokens: 20_000, output_tokens: 200, model: "claude-sonnet-5-5" });
+      } finally {
+        await t.sql.unsafe("drop trigger fail_usage on ai_usage; drop function fail_usage()");
+      }
+    });
+
     it("저장 트랜잭션이 실패하면 보고서·대화·횟수를 그대로 두고 쓴 토큰은 실패로 기록한다", async () => {
       await t.sql.unsafe(`create function fail_revision() returns trigger language plpgsql as $$
         begin if new.request = '저장 실패' then raise exception 'boom'; end if; return new; end $$`);

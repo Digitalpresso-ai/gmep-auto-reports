@@ -1,4 +1,5 @@
 import "server-only";
+import type { Sql, TransactionSql } from "postgres";
 import { db } from "./db";
 import { kstMonthStart, kstToday } from "./domain/dates";
 import type { UsageCounts } from "./domain/usage";
@@ -37,7 +38,8 @@ export type UsageEntry = {
   success: boolean;
 };
 
-export async function recordUsage(e: UsageEntry) {
-  await db()`insert into ai_usage (company_id, kind, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, success)
+/** sql을 주면 그 트랜잭션 안에서 기록한다. 성공한 수정은 보고서 저장과 한 트랜잭션이어야 횟수와 본문이 어긋나지 않는다. */
+export async function recordUsage(e: UsageEntry, sql: Sql | TransactionSql = db()) {
+  await sql`insert into ai_usage (company_id, kind, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, success)
              values (${e.companyId}, ${e.kind}, ${e.model}, ${e.inputTokens}, ${e.outputTokens}, ${e.cacheReadTokens ?? 0}, ${e.cacheWriteTokens ?? 0}, ${e.success})`;
 }
