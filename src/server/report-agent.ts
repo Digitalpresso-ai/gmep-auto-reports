@@ -52,7 +52,7 @@ disableTracing();
 
 const MAX_TURNS = 8;
 // Vercel 함수 300초 안에서 저장·응답까지 끝낼 여유를 둔다
-const DEADLINE_MS = 240_000;
+export const DEADLINE_MS = 240_000;
 
 /** 한 턴에 받은 tool 호출과 그 처리 결과. tool_result는 턴이 끝난 뒤 이 목록에서 만든다. */
 type Call =

@@ -9,7 +9,7 @@ import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, 
 import { photoKey } from "@/lib/photo-layout";
 import { canGenerate, canRevise, usageView, type UsageView } from "./domain/usage";
 import { GMEP_DAILY } from "./domain/template";
-import { runReportAgent, type AgentResult, type TurnUsage } from "./report-agent";
+import { DEADLINE_MS, runReportAgent, type AgentResult, type TurnUsage } from "./report-agent";
 import { cleanReportHtml, titleOf } from "./sanitize";
 import { aiModel } from "./settings";
 import { getObject } from "./storage";
@@ -19,8 +19,7 @@ import { getDraft } from "./workspace";
 const MAX_SCHEDULE_IMAGES = 8;
 // 함수가 비정상 종료해 남은 진행 기록은 이 시간이 지나면 무시한다
 const STALE_INFLIGHT = "5 minutes";
-// AI 수정 한 건의 시간 상한. 루프 시작 전(일정 이미지 받기 등)에 쓴 시간을 빼고 루프에 넘긴다. report-agent.ts의 기본 한도와 같은 값이다.
-const REVISE_BUDGET_MS = 240_000;
+
 // 남은 시간이 이보다 적으면 모델 한 턴도 끝내기 어려우므로 부르지 않는다
 const MIN_AGENT_MS = 30_000;
 
@@ -111,8 +110,8 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
   return {
     model: await aiModel(),
     prompt: buildPrompt(g.input),
-    // 같은 자료로 다시 만들거나 AI로 고칠 때 이 앞부분(일정 이미지·자료·규칙)을 캐시에서 읽는다. 생성 1~3분과
-    // 회사가 보고서를 읽고 수정을 요청하기까지의 간격이 5분을 넘기 쉬워 1시간 캐시를 쓴다(AI-13).
+    // 같은 자료로 다시 만들 때 이 앞부분(일정 이미지·자료·규칙)을 캐시에서 읽는다(AI-13). AI 수정은 블록 패치(AI-14)로 바뀌어
+    // prefix가 달라 이 캐시를 읽지 않는다. 1시간 TTL은 수정이 이 캐시를 읽던 때 정한 값이다.
     cacheTtl: "1h",
     jsonSchema: REPORT_JSON_SCHEMA,
     photoKeys: g.photoKeys,
@@ -245,7 +244,8 @@ export async function reviseReport(companyId: string, date: string, request: str
     const model = await aiModel();
     const previous = await listRevisions(companyId, date);
     const doc = parseBlocks(current.body_html);
-    const deadlineMs = REVISE_BUDGET_MS - (Date.now() - started);
+    // 루프 시작 전(일정 이미지 받기 등)에 쓴 시간을 빼고 루프에 넘긴다
+    const deadlineMs = DEADLINE_MS - (Date.now() - started);
     if (deadlineMs < MIN_AGENT_MS) {
       console.error("AI 수정 시간 부족", { companyId, deadlineMs });
       return { kind: "ai_failed" };
