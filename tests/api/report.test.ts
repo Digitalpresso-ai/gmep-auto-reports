@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelRequest, ModelResult, StreamRequest, StreamResult, StreamUsage, ToolUseEvent } from "@/server/ai";
 import { buildAgentPrompt } from "@/server/domain/agent";
 import { parseBlocks, renderDoc } from "@/server/domain/blocks";
@@ -6,7 +6,12 @@ import { GMEP_DAILY } from "@/server/domain/template";
 import { objects } from "./fake-storage";
 import { companyWithPassword, loginCookie, params, request, startDb, type TestDb } from "./harness";
 
-vi.mock("@/server/storage", () => import("./fake-storage"));
+// 일정 이미지를 받는 동안 시간이 흐른 것처럼 만들 수 있게 getObject 앞에 훅을 둔다
+const storageHook = vi.hoisted(() => ({ beforeGet: null as (() => void) | null }));
+vi.mock("@/server/storage", async () => {
+  const fake = await import("./fake-storage");
+  return { ...fake, getObject: async (path: string) => (storageHook.beforeGet?.(), fake.getObject(path)) };
+});
 const callModel = vi.fn<(r: ModelRequest) => Promise<ModelResult>>();
 type OnToolUse = (t: ToolUseEvent) => void;
 const streamModel = vi.fn<(r: StreamRequest, onToolUse?: OnToolUse) => Promise<StreamResult>>();
@@ -551,6 +556,51 @@ describe("FUNC-10 AI 수정", () => {
       expect(after).not.toMatch(/onclick|script/);
       expect(after).toContain("<p>더러운 문단</p>");
       expect(after).toContain("&quot;현지&quot; 거점 확보");
+    });
+
+    describe("시간 한도", () => {
+      let skew = 0;
+      beforeAll(async () => {
+        await t.sql`insert into shared_days (report_date) values (${dd}) on conflict do nothing`;
+        await t.sql`insert into shared_files (report_date, kind, storage_path, filename, width, height) values (${dd}, 'schedule_image', 'shared/2026-11-09/s1.jpg', 's1.jpg', 1600, 1200)`;
+        objects.set("shared/2026-11-09/s1.jpg", { bytes: new Uint8Array([4, 5, 6]), contentType: "image/jpeg" });
+      });
+      afterAll(async () => {
+        await t.sql`delete from shared_files where report_date = ${dd} and kind = 'schedule_image'`;
+      });
+      beforeEach(() => {
+        skew = 0;
+        const realNow = Date.now.bind(Date);
+        vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
+      });
+      afterEach(() => {
+        vi.mocked(Date.now).mockRestore();
+        storageHook.beforeGet = null;
+      });
+
+      it("일정 이미지를 받는 데 쓴 시간을 루프 시간 한도(240초)에서 뺀다", async () => {
+        storageHook.beforeGet = () => void (skew += 100_000);
+        const id = blockOf(await stored(), "조달 규정 확인");
+        streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: { id, ...insightsList("조달 규정 확인") } }, finish]));
+        expect((await revise(e.cookie, { request: "시사점 유지" }, dd)).status).toBe(200);
+        const deadlineMs = runAgent.mock.calls[0][0].limits?.deadlineMs ?? 0;
+        expect(deadlineMs).toBeLessThanOrEqual(140_000);
+        expect(deadlineMs).toBeGreaterThan(139_000);
+      });
+
+      it("남은 시간이 30초보다 적으면 AI를 부르지 않고 실패로 돌려주며 사용량도 쓰지 않는다", async () => {
+        storageHook.beforeGet = () => void (skew += 220_000);
+        const kept = await stored();
+        const rows = (await usageRows(e.id)).length;
+        const res = await revise(e.cookie, { request: "시간 부족" }, dd);
+        expect(res.status).toBe(502);
+        expect((await res.json()).code).toBe("ai_failed");
+        expect(runAgent).not.toHaveBeenCalled();
+        expect(streamModel).not.toHaveBeenCalled();
+        expect(await stored()).toBe(kept);
+        expect(await usageRows(e.id)).toHaveLength(rows);
+        expect((await t.sql`select 1 from ai_inflight where company_id = ${e.id}`).length).toBe(0);
+      });
     });
 
     it("저장 트랜잭션이 실패하면 보고서·대화·횟수를 그대로 두고 쓴 토큰은 실패로 기록한다", async () => {

@@ -19,6 +19,10 @@ import { getDraft } from "./workspace";
 const MAX_SCHEDULE_IMAGES = 8;
 // 함수가 비정상 종료해 남은 진행 기록은 이 시간이 지나면 무시한다
 const STALE_INFLIGHT = "5 minutes";
+// AI 수정 한 건의 시간 상한. 루프 시작 전(일정 이미지 받기 등)에 쓴 시간을 빼고 루프에 넘긴다. report-agent.ts의 기본 한도와 같은 값이다.
+const REVISE_BUDGET_MS = 240_000;
+// 남은 시간이 이보다 적으면 모델 한 턴도 끝내기 어려우므로 부르지 않는다
+const MIN_AGENT_MS = 30_000;
 
 type ReportView = { title: string; bodyHtml: string; updatedAt: string };
 type AiFailure = { kind: "limit_reached" | "in_progress" | "ai_failed" | "ai_parse_failed" };
@@ -229,6 +233,7 @@ function mergeRevised(before: BlockDoc, html: string): string {
  * 손대지 않은 블록은 원문 바이트 그대로 저장된다. 지난 수정 요청 전체도 함께 보낸다.
  */
 export async function reviseReport(companyId: string, date: string, request: string): Promise<ReviseOutcome> {
+  const started = Date.now();
   const sql = db();
   const [current] = await sql<{ id: string; body_html: string }[]>`
     select id, body_html from reports where company_id = ${companyId} and report_date = ${date}`;
@@ -240,6 +245,11 @@ export async function reviseReport(companyId: string, date: string, request: str
     const model = await aiModel();
     const previous = await listRevisions(companyId, date);
     const doc = parseBlocks(current.body_html);
+    const deadlineMs = REVISE_BUDGET_MS - (Date.now() - started);
+    if (deadlineMs < MIN_AGENT_MS) {
+      console.error("AI 수정 시간 부족", { companyId, deadlineMs });
+      return { kind: "ai_failed" };
+    }
     let r: AgentResult;
     try {
       r = await runReportAgent({
@@ -251,6 +261,7 @@ export async function reviseReport(companyId: string, date: string, request: str
         template: GMEP_DAILY,
         photoKeys: g.photoKeys,
         doc,
+        limits: { deadlineMs },
         onEvent: () => {},
       });
     } catch (e) {
