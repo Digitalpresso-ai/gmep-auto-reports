@@ -316,9 +316,10 @@ export function Workspace({ profile }: { profile: Profile }) {
   async function generate(overwrite: boolean) {
     setConfirmOverwrite(false);
     if (!(await flushDraft())) return;
-    // 생성 중에는 서버가 직접 편집 저장을 409로 거부하고, 다시 만들면 직접 고친 내용은 사라진다(덮어쓰기 확인을 받음)
-    clearTimeout(reportTimer.current);
-    reportDirty.current = false;
+    // 생성 중에는 서버가 직접 편집 저장을 409로 거부한다. 다시 만들기가 실패하면 지금 본문으로 돌아와야 하므로 남은 편집을 먼저 저장한다.
+    if (!(await flushReport())) return setStatus({ kind: "err", text: "직접 고친 내용을 저장하지 못해 보고서를 다시 만들지 않았습니다. 다시 저장한 뒤 시도해 주세요." });
+    // report 상태는 직접 편집을 담지 않으므로, 실패했을 때 되돌릴 본문은 화면에서 뜬다(사진은 되돌린 뒤 다시 채운다)
+    let before: string | null = null;
     setGenerating(true);
     setElapsed(0);
     setStatus(null);
@@ -328,6 +329,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       await apiStream(`/api/days/${date}/report`, { overwrite }, (line) => {
         // start는 사전 검사(이미 있음·한도·진행 중)를 통과한 뒤에만 온다. 그때 시트를 열어야 거절될 때 시트가 깜빡이지 않는다.
         if (line.type === "start") {
+          before = reportEl.current?.innerHTML ?? null;
           setStreaming(true);
           setDocOpen(true);
           if (reportEl.current) reportEl.current.innerHTML = "";
@@ -346,9 +348,11 @@ export function Workspace({ profile }: { profile: Profile }) {
       setReportSave({ text: "저장됨", err: false });
       setStage("chat");
     } catch (e) {
-      // 실패하면 서버의 보고서는 그대로다. 그리던 섹션을 지우고 이전 보고서로 되돌린다.
-      if (reportEl.current) reportEl.current.innerHTML = report?.bodyHtml ?? "";
-      fillPhotos();
+      // 실패하면 서버의 보고서는 그대로다. 그리던 섹션을 지우고 생성 직전 화면(저장한 직접 편집 포함)으로 되돌린다.
+      if (before !== null && reportEl.current) {
+        reportEl.current.innerHTML = before;
+        fillPhotos();
+      }
       if (!report) setDocOpen(false);
       if (e instanceof ApiError && e.code === "limit_reached") setUsage((u) => (u ? { ...u, generateRemaining: 0 } : u));
       setStatus({ kind: "err", text: errorText(e), retry: e instanceof ApiError && e.status !== 429 && e.code !== "report_exists" });
