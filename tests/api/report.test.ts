@@ -200,6 +200,21 @@ describe("FUNC-9 미리보기 직접 수정", () => {
     expect(body.bodyHtml).toBe('<h1>고친 제목</h1><p>문장</p><div class="photos"></div>');
   });
 
+  it("AI가 생성·수정 중이면 직접 편집 저장을 거부하고, 오래된 진행 기록은 무시한다", async () => {
+    const kept = (await (await getReport(a.cookie)).json()).bodyHtml;
+    await t.sql`insert into ai_inflight (company_id) values (${a.id})`;
+    try {
+      const res = await saveReport(a.cookie, { bodyHtml: "<h1>생성 중 편집</h1>" });
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe("in_progress");
+      expect((await (await getReport(a.cookie)).json()).bodyHtml).toBe(kept);
+      await t.sql`update ai_inflight set started_at = now() - interval '10 minutes' where company_id = ${a.id}`;
+      expect((await saveReport(a.cookie, { bodyHtml: kept })).status).toBe(200);
+    } finally {
+      await t.sql`delete from ai_inflight where company_id = ${a.id}`;
+    }
+  });
+
   it("보고서가 없는 날짜는 저장할 수 없다", async () => {
     expect((await saveReport(a.cookie, { bodyHtml: "<h1>x</h1>" }, "2026-11-20")).status).toBe(404);
   });
@@ -536,6 +551,27 @@ describe("FUNC-10 AI 수정", () => {
       expect(after).not.toMatch(/onclick|script/);
       expect(after).toContain("<p>더러운 문단</p>");
       expect(after).toContain("&quot;현지&quot; 거점 확보");
+    });
+
+    it("저장 트랜잭션이 실패하면 보고서·대화·횟수를 그대로 두고 쓴 토큰은 실패로 기록한다", async () => {
+      await t.sql.unsafe(`create function fail_revision() returns trigger language plpgsql as $$
+        begin if new.request = '저장 실패' then raise exception 'boom'; end if; return new; end $$`);
+      await t.sql.unsafe("create trigger fail_revision before insert on report_revisions for each row execute function fail_revision()");
+      try {
+        const kept = await stored();
+        const count = (await t.sql`select 1 from ai_usage where company_id = ${e.id} and kind = 'revise' and success`).length;
+        const id = blockOf(kept, "조달 규정 확인");
+        streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: { id, ...insightsList("규정 확인") } }, finish], { usage: { input: 30_000, output: 300 } }));
+        const res = await revise(e.cookie, { request: "저장 실패" }, dd);
+        expect(res.status).toBe(502);
+        expect((await res.json()).code).toBe("ai_failed");
+        expect(await stored()).toBe(kept);
+        expect((await t.sql`select 1 from ai_usage where company_id = ${e.id} and kind = 'revise' and success`).length).toBe(count);
+        expect((await usageRows(e.id)).at(-1)).toEqual({ kind: "revise", success: false, input_tokens: 30_000, output_tokens: 300, model: "claude-sonnet-5-5" });
+        expect((await (await revisions(e.cookie, dd)).json()).revisions.map((r: { request: string }) => r.request)).not.toContain("저장 실패");
+      } finally {
+        await t.sql.unsafe("drop trigger fail_revision on report_revisions; drop function fail_revision()");
+      }
     });
   });
 });

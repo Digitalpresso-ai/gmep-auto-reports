@@ -28,6 +28,23 @@ export type GenerateOutcome = { kind: "ok"; report: ReportView; usage: UsageView
 export type Revision = { request: string; createdAt: string };
 export type ReviseOutcome = { kind: "ok"; report: ReportView; usage: UsageView; revisions: Revision[] } | { kind: "no_report" } | AiFailure;
 
+/**
+ * 회사가 미리보기에서 고친 HTML을 저장한다(FUNC-9). AI가 생성·수정 중이면 거부한다.
+ * 그 결과가 저장되면 이 편집이 지워지고, 수정은 편집 전 본문을 보고 만든 것이기 때문이다.
+ */
+export async function saveEditedReport(companyId: string, date: string, html: string): Promise<{ kind: "ok"; updatedAt: string } | { kind: "no_report" } | { kind: "in_progress" }> {
+  const clean = cleanReportHtml(html);
+  const sql = db();
+  const rows = await sql<{ updated_at: Date }[]>`
+    update reports set body_html = ${clean}, title = ${titleOf(clean)}, updated_at = now()
+    where company_id = ${companyId} and report_date = ${date}
+      and not exists (select 1 from ai_inflight where company_id = ${companyId} and started_at >= now() - ${STALE_INFLIGHT}::interval)
+    returning updated_at`;
+  if (rows.length) return { kind: "ok", updatedAt: rows[0].updated_at.toISOString() };
+  const [exists] = await sql`select 1 from reports where company_id = ${companyId} and report_date = ${date}`;
+  return exists ? { kind: "in_progress" } : { kind: "no_report" };
+}
+
 async function reserve(companyId: string): Promise<boolean> {
   const rows = await db()`
     insert into ai_inflight (company_id) values (${companyId})
@@ -243,19 +260,28 @@ export async function reviseReport(companyId: string, date: string, request: str
     }
     // 하루 수정 횟수(AI-9)는 성공한 revise 행 수로 센다. 턴마다 행을 넣으면 한 번의 요청이 여러 번으로 세지므로 요청 하나에 한 행만 넣는다.
     // 실패해도 쓴 토큰은 월 합계에 들어가야 하므로 success=false로 기록한다(AI-12).
-    await recordUsage(revisionUsage(companyId, model, r.usages, r.ok));
     if (!r.ok) {
+      await recordUsage(revisionUsage(companyId, model, r.usages, false));
       console.error("AI 수정 실패", { companyId, reason: r.reason });
       return { kind: r.reason === "max_tokens" ? "ai_parse_failed" : "ai_failed" };
     }
     const bodyHtml = mergeRevised(doc, r.html);
     const title = titleOf(bodyHtml);
-    const [row] = await sql.begin(async (tx) => {
-      const rows = await tx<{ updated_at: Date }[]>`
-        update reports set title = ${title}, body_html = ${bodyHtml}, updated_at = now() where id = ${current.id} returning updated_at`;
-      await tx`insert into report_revisions (report_id, request) values (${current.id}, ${request})`;
-      return rows;
-    });
+    let row: { updated_at: Date };
+    try {
+      [row] = await sql.begin(async (tx) => {
+        const rows = await tx<{ updated_at: Date }[]>`
+          update reports set title = ${title}, body_html = ${bodyHtml}, updated_at = now() where id = ${current.id} returning updated_at`;
+        await tx`insert into report_revisions (report_id, request) values (${current.id}, ${request})`;
+        return rows;
+      });
+    } catch (e) {
+      // 저장하지 못한 수정은 횟수에서 빼지 않는다. 성공으로 먼저 기록하면 보고서는 그대로인데 횟수만 줄어든다.
+      await recordUsage(revisionUsage(companyId, model, r.usages, false));
+      console.error("AI 수정 저장 실패", { companyId, error: e instanceof Error ? e.message : String(e) });
+      return { kind: "ai_failed" };
+    }
+    await recordUsage(revisionUsage(companyId, model, r.usages, true));
     return {
       kind: "ok",
       report: { title, bodyHtml, updatedAt: row.updated_at.toISOString() },

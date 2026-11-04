@@ -1,9 +1,8 @@
 import { requireCompany } from "@/server/auth";
 import { db } from "@/server/db";
 import { isIsoDate } from "@/server/domain/dates";
-import { generateReport } from "@/server/generate";
+import { generateReport, saveEditedReport } from "@/server/generate";
 import { badRequest, fail, notFound, ok, readJson } from "@/server/http";
-import { cleanReportHtml, titleOf } from "@/server/sanitize";
 
 // 생성은 1~3분 걸린다(AI-7). Vercel Hobby 함수 한도가 300초다.
 export const maxDuration = 300;
@@ -50,9 +49,13 @@ export async function PUT(req: Request, ctx: RouteContext<"/api/days/[date]/repo
   if (!isIsoDate(date)) return badRequest("날짜 형식이 잘못되었습니다");
   const html = (await readJson(req))?.bodyHtml;
   if (typeof html !== "string" || html.length > MAX_HTML) return badRequest("보고서 내용이 잘못되었습니다");
-  const clean = cleanReportHtml(html);
-  const rows = await db()<{ updated_at: Date }[]>`
-    update reports set body_html = ${clean}, title = ${titleOf(clean)}, updated_at = now()
-    where company_id = ${s.companyId} and report_date = ${date} returning updated_at`;
-  return rows.length ? ok({ updatedAt: rows[0].updated_at.toISOString() }) : notFound();
+  const r = await saveEditedReport(s.companyId, date, html);
+  switch (r.kind) {
+    case "ok":
+      return ok({ updatedAt: r.updatedAt });
+    case "in_progress":
+      return fail(409, "in_progress", "AI가 보고서를 작성하는 중입니다. 끝난 뒤 다시 저장해 주세요");
+    case "no_report":
+      return notFound();
+  }
 }
