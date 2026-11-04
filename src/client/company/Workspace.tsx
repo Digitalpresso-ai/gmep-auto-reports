@@ -147,7 +147,8 @@ export function Workspace({ profile }: { profile: Profile }) {
         setSelected(sel);
         setUsage(v.usage);
         setReport(r);
-        setStage(r ? "chat" : "input");
+        // 다시 접속하거나 날짜를 바꾸면 보고서가 있어도 입력 화면에서 시작한다. 수정 대화는 '수정 대화로 돌아가기'로 연다.
+        setStage("input");
         setLoadError("");
       },
       (e) => !cancelled && setLoadError(errorText(e)),
