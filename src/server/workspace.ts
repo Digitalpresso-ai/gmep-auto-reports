@@ -66,6 +66,16 @@ export async function getDayView(companyId: string, date: string): Promise<DayVi
   };
 }
 
+export type ReportSummary = { date: string; title: string; updatedAt: string };
+
+/** 회사의 보고서를 최근 날짜부터. 목록에는 본문을 싣지 않는다. */
+export async function listReports(companyId: string): Promise<ReportSummary[]> {
+  const rows = await db()<{ date: string; title: string; updated_at: Date }[]>`
+    select to_char(report_date, 'YYYY-MM-DD') as date, title, updated_at from reports
+    where company_id = ${companyId} order by report_date desc`;
+  return rows.map((r) => ({ date: r.date, title: r.title, updatedAt: r.updated_at.toISOString() }));
+}
+
 /** 회사가 볼 수 있는 사진만 선택 순서대로 돌려준다. 하나라도 볼 수 없으면 null(AUTH-8, SHARED-3). */
 export async function resolvePhotos(companyId: string, date: string, refs: PhotoRef[]): Promise<ResolvedPhoto[] | null> {
   if (!refs.length) return [];
