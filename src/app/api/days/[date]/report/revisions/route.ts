@@ -4,7 +4,7 @@ import { REVISION_REQUEST_LIMIT } from "@/server/domain/prompt";
 import { listRevisions, reviseReport } from "@/server/generate";
 import { badRequest, fail, ok, readJson } from "@/server/http";
 
-// 수정도 보고서 전체를 다시 출력하므로 생성과 같은 시간이 걸린다(AI-7)
+// 수정은 바꿀 블록만 tool로 내지만 턴이 여러 번이고, 루프 시간 상한(report-agent.ts 240초)이 함수 한도 안에 들어야 한다(AI-7)
 export const maxDuration = 300;
 
 export async function GET(req: Request, ctx: RouteContext<"/api/days/[date]/report/revisions">) {

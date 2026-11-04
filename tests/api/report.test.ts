@@ -1,11 +1,21 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelRequest, ModelResult } from "@/server/ai";
+import type { ModelRequest, ModelResult, StreamRequest, StreamResult, StreamUsage, ToolUseEvent } from "@/server/ai";
+import { buildAgentPrompt } from "@/server/domain/agent";
+import { parseBlocks, renderDoc } from "@/server/domain/blocks";
+import { GMEP_DAILY } from "@/server/domain/template";
 import { objects } from "./fake-storage";
 import { companyWithPassword, loginCookie, params, request, startDb, type TestDb } from "./harness";
 
 vi.mock("@/server/storage", () => import("./fake-storage"));
 const callModel = vi.fn<(r: ModelRequest) => Promise<ModelResult>>();
-vi.mock("@/server/ai", () => ({ callModel: (r: ModelRequest) => callModel(r) }));
+type OnToolUse = (t: ToolUseEvent) => void;
+const streamModel = vi.fn<(r: StreamRequest, onToolUse?: OnToolUse) => Promise<StreamResult>>();
+// ReAct 루프(report-agent.ts)와 블록 도메인은 실제로 돌리고, 모델 한 턴(streamModel)만 가짜로 바꾼다
+vi.mock("@/server/ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/ai")>()),
+  callModel: (r: ModelRequest) => callModel(r),
+  streamModel: (r: StreamRequest, onToolUse?: OnToolUse) => streamModel(r, onToolUse),
+}));
 
 let t: TestDb;
 let a: { id: string; cookie: string };
@@ -37,7 +47,10 @@ beforeAll(async () => {
   await t.sql`insert into shared_materials (report_date, kind, filename, text_content) values (${date}, 'education', '강의.pdf', '시장 진입 전략')`;
 });
 afterAll(() => t?.stop());
-beforeEach(() => callModel.mockReset());
+beforeEach(() => {
+  callModel.mockReset();
+  streamModel.mockReset();
+});
 
 const generate = async (cookie: string, body: unknown = {}, d = date) =>
   (await import("@/app/api/days/[date]/report/route")).POST(request("POST", "/x", { cookie, body }), params({ date: d }));
@@ -223,8 +236,43 @@ describe("FUNC-10 AI 수정", () => {
     (await import("@/app/api/days/[date]/report/revisions/route")).GET(request("GET", "/x", { cookie }), params({ date: dd }));
   const revise = async (cookie: string, body: unknown, dd = d) =>
     (await import("@/app/api/days/[date]/report/revisions/route")).POST(request("POST", "/x", { cookie, body }), params({ date: dd }));
-  const revised = (title: string, photos = [{ no: 1, place: "schedule" }]) =>
-    reply(JSON.stringify({ title, schedule: [["09:30", "온보딩", "참석"]], achievements: [{ t: "성과", sub: [] }], photos }), 30_000, 900, 28_000, 0);
+  const storedBody = async () => (await t.sql<{ body_html: string }[]>`select body_html from reports where company_id = ${c.id} and report_date = ${d}`)[0].body_html;
+  const reviseUsed = async () => (await (await (await import("@/app/api/days/[date]/route")).GET(request("GET", "/x", { cookie: c.cookie }), params({ date: d }))).json()).usage;
+
+  type FakeCall = { name: string; input: unknown };
+  let toolSeq = 0;
+  /** 모델 한 턴: tool 호출마다 onToolUse를 부르고(content_block_stop) 턴 결과를 돌려준다. */
+  const turn =
+    (calls: FakeCall[], o: { usage?: Partial<StreamUsage>; stop?: string; model?: string } = {}) =>
+    async (_r: StreamRequest, onToolUse?: OnToolUse): Promise<StreamResult> => {
+      const content = calls.map((x) => ({ type: "tool_use" as const, id: `toolu_${++toolSeq}`, name: x.name, input: x.input }));
+      for (const b of content) onToolUse?.({ id: b.id, name: b.name, input: b.input });
+      return {
+        content,
+        stopReason: o.stop ?? (calls.length ? "tool_use" : "end_turn"),
+        model: o.model ?? "claude-sonnet-5-5",
+        usage: { input: 30_000, output: 300, cacheRead: 28_000, cacheWrite: 0, ...o.usage },
+        latencyMs: 10,
+        firstToolMs: calls.length ? 5 : null,
+      };
+    };
+  const plan = (id: string) => ({ name: "plan_outline", input: { sections: [{ heading: id, intent: "요청 반영" }] } });
+  const finish = { name: "finish", input: { note: "" } };
+  const insightsList = (text: string) => ({ items: [{ text, sub: ["근거: 강연 사례", "적용: 제품 문서 현지화"] }] });
+  /** 저장된 보고서에서 needle을 담은 블록의 id. */
+  const blockOf = (html: string, needle: string) => parseBlocks(html).blocks.find((x) => x.html.includes(needle))!.id;
+
+  const firstReport = JSON.stringify({
+    title: "처음",
+    schedule: [["09:30", "온보딩", "참석"]],
+    achievements: [{ t: "현지 거점 확보", sub: ["코워킹 이용"] }],
+    insights: [{ t: "현지 수요 확인", sub: ["근거: 강연"] }],
+    plans: ["11. 7.(토) 후속 미팅 준비"],
+    photos: [{ no: 1, place: "photos" }, { no: 2, place: "schedule" }],
+  });
+  // 회사가 직접 고친 뒤 첫 수정 직전의 본문과, 그 수정이 바꿀 시사점 목록 블록
+  let before = "";
+  let target = "";
 
   beforeAll(async () => {
     const id = await companyWithPassword(t.sql, "주식회사 수정테스트", "r-password");
@@ -236,70 +284,158 @@ describe("FUNC-10 AI 수정", () => {
     const selectedPhotos = [{ source: "shared", id: p1 }, { source: "shared", id: p2 }];
     await (await import("@/app/api/days/[date]/draft/route")).PUT(request("PUT", "/x", { cookie: c.cookie, body: { selectedPhotos } }), params({ date: d }));
   });
+  // 수정 경로가 JSON 호출로 돌아가면 바로 드러나게 한다. 생성은 mockResolvedValueOnce로 따로 준다.
+  beforeEach(() => {
+    callModel.mockRejectedValue(new Error("AI 수정은 JSON 호출을 쓰지 않는다"));
+    streamModel.mockRejectedValue(new Error("예상하지 않은 모델 턴"));
+  });
 
   it("보고서가 없으면 수정할 수 없다", async () => {
     const res = await revise(c.cookie, { request: "시사점을 더 구체적으로" });
     expect(res.status).toBe(404);
     expect(callModel).not.toHaveBeenCalled();
+    expect(streamModel).not.toHaveBeenCalled();
   });
 
-  it("생성 프롬프트를 그대로 캐시 블록으로 두고, 직접 고친 현재 보고서와 수정 요청을 뒤에 붙인다", async () => {
-    callModel.mockResolvedValueOnce(reply(JSON.stringify({ title: "처음", schedule: [["09:30", "온보딩", "참석"]], photos: [{ no: 1, place: "photos" }, { no: 2, place: "schedule" }] })));
+  it("블록 패치 프롬프트로 고친다: 첫 user 블록은 buildAgentPrompt 결과이고, followUp에 [b번호] 블록 목록과 요청이 들어간다", async () => {
+    callModel.mockResolvedValueOnce(reply(firstReport));
     expect((await generate(c.cookie, {}, d)).status).toBe(200);
     const genReq = callModel.mock.calls[0][0];
-    const current = (await (await getReport(c.cookie, d)).json()).bodyHtml as string;
-    await saveReport(c.cookie, { bodyHtml: current.replace("<h1>처음</h1>", "<h1>직접 고친 제목</h1>") }, d);
+    const generated = await storedBody();
+    await saveReport(c.cookie, { bodyHtml: generated.replace("<h1>처음</h1>", "<h1>직접 고친 제목</h1>").replace("<li>코워킹 이용</li>", "<li>회사가 직접 쓴 메모 &amp; 연락처</li>") }, d);
+    before = await storedBody();
+    expect(before).toContain("회사가 직접 쓴 메모 &amp; 연락처");
+    target = blockOf(before, "현지 수요 확인");
 
-    callModel.mockResolvedValueOnce(revised("시사점 보강"));
+    streamModel.mockImplementationOnce(turn([plan(target), { name: "replace_list", input: { id: target, ...insightsList("현지 조달 규정 확인") } }, finish]));
     const res = await revise(c.cookie, { request: "  시사점을 더 구체적으로  " });
     expect(res.status).toBe(200);
-    const body = await res.json();
-    const req = callModel.mock.calls[1][0];
-    expect(req.prompt).toBe(genReq.prompt);
+    expect(callModel).toHaveBeenCalledTimes(1);
+    expect(streamModel).toHaveBeenCalledTimes(1);
+    const req = streamModel.mock.calls[0][0];
+    // 캐시 prefix: 생성 입력과 양식만으로 만들고 수정 요청·현재 문서는 넣지 않는다
+    const expectedPrompt = buildAgentPrompt(
+      {
+        companyName: "주식회사 수정테스트",
+        traveler: "",
+        businessIntro: "",
+        date: d,
+        proposalText: "",
+        scheduleText: "09:30 온보딩",
+        scheduleMaterials: [],
+        educationMaterials: [],
+        notes: "",
+        hasScheduleImages: false,
+        photos: [{ description: "[투어] 거점" }, { description: "[강연] 발표" }],
+      },
+      GMEP_DAILY,
+    );
+    expect(req.prompt).toBe(expectedPrompt);
     expect(req.images).toEqual(genReq.images);
-    expect(req.cacheTtl).toBe("1h");
-    expect(req.jsonSchema).toBe(genReq.jsonSchema);
-    expect(req.followUp).toContain("<h1>직접 고친 제목</h1>");
+    expect(req.turns).toEqual([]);
+    expect(req.followUp).toContain("[AI 수정]");
+    expect(req.followUp).toContain("[b1] <h1>직접 고친 제목</h1>");
+    expect(req.followUp).toContain(`[${target}] <ul><li><strong>현지 수요 확인</strong>`);
     // 사진 자리는 사진 키 대신 프롬프트의 사진 번호로 보여 준다
     expect(req.followUp).toContain("<p>[사진 2]</p>");
     expect(req.followUp).not.toContain("shared:");
+    expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 문서에 반영됨]\n(없음)");
     expect(req.followUp).toContain("[이번 수정 요청]\n시사점을 더 구체적으로");
-    expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 보고서에 반영됨]\n(없음)");
-    expect(body.report.title).toBe("시사점 보강");
-    expect(body.report.bodyHtml).toContain(`<div class="photos" data-photos="shared:${p1}"></div>`);
+
+    const body = await res.json();
+    expect(body.report.title).toBe("직접 고친 제목");
+    expect(body.report.bodyHtml).toContain("<strong>현지 조달 규정 확인</strong>");
+    expect(body.report.bodyHtml).not.toContain("현지 수요 확인");
     expect(body.revisions.map((r: { request: string }) => r.request)).toEqual(["시사점을 더 구체적으로"]);
     expect(body.usage).toMatchObject({ reviseUsed: 1, reviseLimit: 15, reviseRemaining: 14, generateRemaining: 4 });
-    expect((await (await getReport(c.cookie, d)).json()).title).toBe("시사점 보강");
-    const [row] = await t.sql`select kind, success, cache_read_tokens from ai_usage where company_id = ${c.id} order by id desc limit 1`;
-    expect(row).toEqual({ kind: "revise", success: true, cache_read_tokens: 28_000 });
+    expect((await (await getReport(c.cookie, d)).json()).bodyHtml).toBe(body.report.bodyHtml);
+  });
+
+  it("요청이 가리키지 않은 블록(회사가 직접 고친 문장 포함)은 저장된 본문에서 바이트 그대로다", async () => {
+    const doc = parseBlocks(before);
+    const expected = renderDoc({
+      blocks: doc.blocks.map((x) => (x.id === target ? { ...x, html: "<ul><li><strong>현지 조달 규정 확인</strong><ul><li>근거: 강연 사례</li><li>적용: 제품 문서 현지화</li></ul></li></ul>" } : x)),
+    });
+    expect(expected).not.toBe(before);
+    expect(await storedBody()).toBe(expected);
+  });
+
+  it("여러 턴이 돌아도 사용량은 수정 1건당 1행(토큰은 턴 합계, 모델은 마지막 턴)이고 하루 수정 횟수는 1만 오른다(AI-9, AI-12)", async () => {
+    const rowsBefore = (await usageRows(c.id)).length;
+    const usedBefore = (await reviseUsed()).reviseUsed;
+    const current = await storedBody();
+    const id = blockOf(current, "현지 조달 규정 확인");
+    streamModel
+      .mockImplementationOnce(turn([plan(id)], { usage: { input: 30_000, output: 100, cacheRead: 28_000, cacheWrite: 2_000 } }))
+      .mockImplementationOnce(turn([{ name: "replace_list", input: { id, ...insightsList("조달 규정 확인") } }], { usage: { input: 31_000, output: 200, cacheRead: 30_000 } }))
+      .mockImplementationOnce(turn([finish], { usage: { input: 32_000, output: 50, cacheRead: 31_000 }, model: "claude-opus-5-5" }));
+    const res = await revise(c.cookie, { request: "아까 바꾼 시사점을 조금 짧게" });
+    expect(res.status).toBe(200);
+    expect(streamModel).toHaveBeenCalledTimes(3);
+    expect((await res.json()).usage.reviseUsed).toBe(usedBefore + 1);
+    const rows = await t.sql`select kind, success, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens from ai_usage where company_id = ${c.id} order by id`;
+    expect(rows).toHaveLength(rowsBefore + 1);
+    expect(rows.at(-1)).toEqual({
+      kind: "revise",
+      success: true,
+      model: "claude-opus-5-5",
+      input_tokens: 93_000,
+      output_tokens: 350,
+      cache_read_tokens: 89_000,
+      cache_write_tokens: 2_000,
+    });
   });
 
   it("다음 수정 때 지난 수정 요청을 모두 순서대로 보낸다", async () => {
-    callModel.mockResolvedValueOnce(revised("짧게"));
-    expect((await revise(c.cookie, { request: "아까 바꾼 시사점을 조금 짧게" })).status).toBe(200);
-    callModel.mockResolvedValueOnce(revised("표"));
+    const id = blockOf(await storedBody(), "<th>시간</th>");
+    const table = { id, style: "grid", head: ["시간", "프로그램", "장소", "수행 내용"], rows: [["09:30", "온보딩", "코워킹", "참석"]] };
+    streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_table", input: table }, finish]));
     expect((await revise(c.cookie, { request: "일정 표에 장소 추가" })).status).toBe(200);
-    const req = callModel.mock.calls[1][0];
-    expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 보고서에 반영됨]\n1. 시사점을 더 구체적으로\n2. 아까 바꾼 시사점을 조금 짧게\n");
+    const req = streamModel.mock.calls[0][0];
+    expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 문서에 반영됨]\n1. 시사점을 더 구체적으로\n2. 아까 바꾼 시사점을 조금 짧게\n");
     expect(req.followUp).toContain("[이번 수정 요청]\n일정 표에 장소 추가");
     const list = await (await revisions(c.cookie)).json();
     expect(list.revisions.map((r: { request: string }) => r.request)).toEqual(["시사점을 더 구체적으로", "아까 바꾼 시사점을 조금 짧게", "일정 표에 장소 추가"]);
   });
 
-  it("AI가 실패하면 보고서·대화를 바꾸지 않고 횟수도 차감하지 않는다", async () => {
-    callModel.mockRejectedValueOnce(new Error("overloaded"));
+  it("스트림이 끊기면 보고서·대화를 바꾸지 않고 횟수도 차감하지 않되, 쓴 토큰은 실패로 기록한다", async () => {
+    const { ModelStreamError } = await vi.importActual<typeof import("@/server/ai")>("@/server/ai");
+    const kept = await storedBody();
+    const id = blockOf(kept, "조달 규정 확인");
+    streamModel
+      .mockImplementationOnce(turn([plan(id)], { usage: { input: 30_000, output: 100, cacheRead: 28_000 } }))
+      .mockImplementationOnce(async (_r, onToolUse) => {
+        onToolUse?.({ id: "toolu_x", name: "delete_block", input: { id } });
+        throw new ModelStreamError({ input: 31_000, output: 40, cacheRead: 30_000, cacheWrite: 0 }, "claude-sonnet-5-5", new Error("overloaded"));
+      });
     const res = await revise(c.cookie, { request: "실패할 요청" });
     expect(res.status).toBe(502);
-    expect((await (await getReport(c.cookie, d)).json()).title).toBe("표");
+    expect((await res.json()).code).toBe("ai_failed");
+    expect(await storedBody()).toBe(kept);
     expect((await (await revisions(c.cookie)).json()).revisions).toHaveLength(3);
-    const day = await (await (await import("@/app/api/days/[date]/route")).GET(request("GET", "/x", { cookie: c.cookie }), params({ date: d }))).json();
-    expect(day.usage.reviseRemaining).toBe(12);
+    expect((await reviseUsed()).reviseRemaining).toBe(12);
+    const [last] = (await usageRows(c.id)).slice(-1);
+    expect(last).toEqual({ kind: "revise", success: false, input_tokens: 61_000, output_tokens: 140, model: "claude-sonnet-5-5" });
+  });
+
+  it("응답이 잘리면(max_tokens) 형식 실패로 돌려주고 보고서는 그대로 둔다", async () => {
+    const kept = await storedBody();
+    const id = blockOf(kept, "조달 규정 확인");
+    streamModel.mockImplementationOnce(turn([{ name: "delete_block", input: { id } }], { stop: "max_tokens", usage: { input: 30_000, output: 8_000 } }));
+    const res = await revise(c.cookie, { request: "잘릴 요청" });
+    expect(res.status).toBe(502);
+    expect((await res.json()).code).toBe("ai_parse_failed");
+    expect(await storedBody()).toBe(kept);
+    expect((await (await revisions(c.cookie)).json()).revisions).toHaveLength(3);
+    expect((await reviseUsed()).reviseRemaining).toBe(12);
+    const [last] = (await usageRows(c.id)).slice(-1);
+    expect(last).toMatchObject({ kind: "revise", success: false, input_tokens: 30_000, output_tokens: 8_000 });
   });
 
   it("빈 요청이나 너무 긴 요청은 받지 않는다", async () => {
     expect((await revise(c.cookie, { request: "   " })).status).toBe(400);
     expect((await revise(c.cookie, { request: "가".repeat(1001) })).status).toBe(400);
-    expect(callModel).not.toHaveBeenCalled();
+    expect(streamModel).not.toHaveBeenCalled();
   });
 
   it("하루 수정 한도를 다 쓰면 AI를 부르지 않는다(AI-9)", async () => {
@@ -307,14 +443,14 @@ describe("FUNC-10 AI 수정", () => {
     const res = await revise(c.cookie, { request: "한 번 더" });
     expect(res.status).toBe(429);
     expect((await res.json()).code).toBe("limit_reached");
-    expect(callModel).not.toHaveBeenCalled();
+    expect(streamModel).not.toHaveBeenCalled();
     await t.sql`update companies set daily_revise_limit = 15 where id = ${c.id}`;
   });
 
   it("다른 회사는 이 회사의 수정 대화를 보거나 이 날짜 보고서를 고칠 수 없다(AUTH-8)", async () => {
     expect((await (await revisions(b.cookie)).json()).revisions).toEqual([]);
     expect((await revise(b.cookie, { request: "침입" })).status).toBe(404);
-    expect(callModel).not.toHaveBeenCalled();
+    expect(streamModel).not.toHaveBeenCalled();
   });
 
   it("보고서를 다시 만들면 수정 대화를 지운다", async () => {

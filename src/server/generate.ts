@@ -1,13 +1,18 @@
 import "server-only";
-import { callModel, type ModelRequest } from "./ai";
+import { callModel, ModelStreamError, type ModelRequest } from "./ai";
 import { db } from "./db";
-import { buildPrompt, buildRevisionFollowUp, htmlWithPhotoNumbers, type Material, type PromptInput } from "./domain/prompt";
+import { buildAgentPrompt, buildAgentRevision } from "./domain/agent";
+import { numberedForModel, parseBlocks } from "./domain/blocks";
+import { buildPrompt, type Material, type PromptInput } from "./domain/prompt";
 import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, type Report } from "./domain/report";
 import { photoKey } from "@/lib/photo-layout";
 import { canGenerate, canRevise, usageView, type UsageView } from "./domain/usage";
+import { GMEP_DAILY } from "./domain/template";
+import { runReportAgent, type AgentResult, type TurnUsage } from "./report-agent";
+import { cleanReportHtml, titleOf } from "./sanitize";
 import { aiModel } from "./settings";
 import { getObject } from "./storage";
-import { usageCounts, recordUsage } from "./usage";
+import { usageCounts, recordUsage, type UsageEntry } from "./usage";
 import { getDraft } from "./workspace";
 
 const MAX_SCHEDULE_IMAGES = 8;
@@ -99,8 +104,8 @@ function mediaTypeOf(path: string): ModelRequest["images"][number]["mediaType"] 
   return "image/jpeg";
 }
 
-// 응답이 JSON이 아니면 한 번만 다시 부른다(AI-5). 실패한 호출도 토큰은 썼으므로 기록하되 횟수에서는 빼지 않는다(AI-9).
-async function callForReport(companyId: string, kind: "generate" | "revise", req: ModelRequest): Promise<Report | "ai_failed" | "ai_parse_failed"> {
+// 생성 전용. 응답이 JSON이 아니면 한 번만 다시 부른다(AI-5). 실패한 호출도 토큰은 썼으므로 기록하되 횟수에서는 빼지 않는다(AI-9).
+async function callForReport(companyId: string, kind: "generate", req: ModelRequest): Promise<Report | "ai_failed" | "ai_parse_failed"> {
   for (let attempt = 0; attempt < 2; attempt++) {
     let result;
     try {
@@ -162,7 +167,25 @@ export async function listRevisions(companyId: string, date: string): Promise<Re
   return rows.map((r) => ({ request: r.request, createdAt: r.created_at.toISOString() }));
 }
 
-/** 저장된 현재 보고서(직접 고친 내용 포함)와 지난 수정 요청 전체를 보내 이번 요청만 반영한 보고서로 바꾼다(FUNC-10). */
+/** 수정 한 건의 사용량. 턴이 여러 번이어도 한 행으로 합친다: 토큰은 턴 합계, model은 마지막 턴. */
+function revisionUsage(companyId: string, fallbackModel: string, usages: TurnUsage[], success: boolean): UsageEntry {
+  const sum = (f: (u: TurnUsage) => number) => usages.reduce((n, u) => n + f(u), 0);
+  return {
+    companyId,
+    kind: "revise",
+    model: usages.at(-1)?.model ?? fallbackModel,
+    inputTokens: sum((u) => u.input),
+    outputTokens: sum((u) => u.output),
+    cacheReadTokens: sum((u) => u.cacheRead),
+    cacheWriteTokens: sum((u) => u.cacheWrite),
+    success,
+  };
+}
+
+/**
+ * 저장된 현재 보고서(직접 고친 내용 포함)를 블록으로 나눠 보내고, 이번 요청이 가리키는 블록만 tool로 바꾼다(FUNC-10).
+ * 손대지 않은 블록은 원문 바이트 그대로 저장된다. 지난 수정 요청 전체도 함께 보낸다.
+ */
 export async function reviseReport(companyId: string, date: string, request: string): Promise<ReviseOutcome> {
   const sql = db();
   const [current] = await sql<{ id: string; body_html: string }[]>`
@@ -171,25 +194,46 @@ export async function reviseReport(companyId: string, date: string, request: str
   if (!canRevise(await usageCounts(companyId))) return { kind: "limit_reached" };
   if (!(await reserve(companyId))) return { kind: "in_progress" };
   try {
-    const req = await promptRequest(companyId, date);
+    const g = await generationInput(companyId, date);
+    const model = await aiModel();
     const previous = await listRevisions(companyId, date);
-    const followUp = buildRevisionFollowUp({
-      currentHtml: htmlWithPhotoNumbers(current.body_html, req.photoKeys),
-      previousRequests: previous.map((r) => r.request),
-      request,
-    });
-    const report = await callForReport(companyId, "revise", { ...req, followUp });
-    if (typeof report === "string") return { kind: report };
-    const bodyHtml = renderReportHtml(report, req.photoKeys);
+    const doc = parseBlocks(current.body_html);
+    let r: AgentResult;
+    try {
+      r = await runReportAgent({
+        model,
+        // 생성 입력과 양식만으로 만든 캐시 prefix. 수정 요청·현재 문서는 followUp(캐시 밖)에만 둔다.
+        prompt: buildAgentPrompt(g.input, GMEP_DAILY),
+        followUp: buildAgentRevision({ numberedDoc: numberedForModel(doc, g.photoKeys), previousRequests: previous.map((x) => x.request), request }),
+        images: g.images,
+        template: GMEP_DAILY,
+        photoKeys: g.photoKeys,
+        doc,
+        onEvent: () => {},
+      });
+    } catch (e) {
+      // runReportAgent는 스트림 예외(ModelStreamError 등)를 결과로 바꾸지만, 그 밖의 예외도 실패로 기록한다
+      const usages = e instanceof ModelStreamError && e.usage ? [{ ...e.usage, model: e.model ?? model, latencyMs: 0, firstToolMs: null }] : [];
+      r = { ok: false, reason: "ai_failed", usages };
+    }
+    // 하루 수정 횟수(AI-9)는 성공한 revise 행 수로 센다. 턴마다 행을 넣으면 한 번의 요청이 여러 번으로 세지므로 요청 하나에 한 행만 넣는다.
+    // 실패해도 쓴 토큰은 월 합계에 들어가야 하므로 success=false로 기록한다(AI-12).
+    await recordUsage(revisionUsage(companyId, model, r.usages, r.ok));
+    if (!r.ok) {
+      console.error("AI 수정 실패", { companyId, reason: r.reason });
+      return { kind: r.reason === "max_tokens" ? "ai_parse_failed" : "ai_failed" };
+    }
+    const bodyHtml = cleanReportHtml(r.html);
+    const title = titleOf(bodyHtml);
     const [row] = await sql.begin(async (tx) => {
       const rows = await tx<{ updated_at: Date }[]>`
-        update reports set title = ${report.title}, body_html = ${bodyHtml}, updated_at = now() where id = ${current.id} returning updated_at`;
+        update reports set title = ${title}, body_html = ${bodyHtml}, updated_at = now() where id = ${current.id} returning updated_at`;
       await tx`insert into report_revisions (report_id, request) values (${current.id}, ${request})`;
       return rows;
     });
     return {
       kind: "ok",
-      report: { title: report.title, bodyHtml, updatedAt: row.updated_at.toISOString() },
+      report: { title, bodyHtml, updatedAt: row.updated_at.toISOString() },
       usage: usageView(await usageCounts(companyId)),
       revisions: await listRevisions(companyId, date),
     };
