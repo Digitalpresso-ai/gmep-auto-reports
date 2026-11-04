@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EDU_LIMIT, PROPOSAL_LIMIT, buildPrompt, type PromptInput } from "@/server/domain/prompt";
-import { normalizeReport, parseModelJson, renderReportHtml } from "@/server/domain/report";
+import { normalizeReport, parseModelJson, renderPartialReportHtml, renderReportHtml } from "@/server/domain/report";
 
 const base: PromptInput = {
   companyName: "주식회사 디지털프레소",
@@ -123,5 +123,58 @@ describe("FUNC-8 보고서 HTML", () => {
     const html = renderReportHtml(normalizeReport({ title: '<img src=x onerror="alert(1)">' }));
     expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
     expect(html).not.toContain("<img");
+  });
+});
+
+describe("생성 중 미리보기 부분 렌더", () => {
+  const full = {
+    title: "GMEP 일일 출장보고서",
+    basic: [["일자", "2026. 11. 2.(월)"]],
+    schedule: [["09:30", "온보딩", "참석"]],
+    education: [{ title: "3-1. 강연", items: [{ t: "시장", sub: ["세부"] }], table: null }],
+    achievements: [{ t: "거점 확보", sub: [] }],
+    special: [],
+    insights: [{ t: "현지 수요", sub: ["근거"] }],
+    plans: ["후속 미팅"],
+    attachments: ["강연 자료"],
+    photos: [{ no: 1, place: "schedule" }, { no: 2, place: "edu:1" }],
+  };
+  const keys = Object.keys(full);
+  const photoKeys = ["shared:a", "shared:b"];
+  // 최종 본문에서 사진 자리와 번호 붙은 참여 사진 제목을 뺀 것
+  const withoutPhotos = (html: string) => html.replace(/<div class="photos"[^>]*><\/div>/g, "").replace(/<h2>\d+\. 참여 사진<\/h2>/, "");
+
+  it("모든 키가 끝나면 사진 자리와 참여 사진 섹션만 뺀 최종 본문과 같다", () => {
+    const html = renderPartialReportHtml(full, keys);
+    expect(html).toBe(withoutPhotos(renderReportHtml(normalizeReport(full), photoKeys)));
+    expect(html).not.toContain("photos");
+    expect(html).toMatch(/<h2>붙임<\/h2><ul><li>강연 자료<\/li><\/ul>$/);
+  });
+
+  it("끝난 키의 섹션만 순서대로 그린다", () => {
+    expect(renderPartialReportHtml({}, [])).toBe("");
+    expect(renderPartialReportHtml({ title: "t" }, ["title"])).toBe("<h1>t</h1>");
+    const html = renderPartialReportHtml(full, ["title", "basic", "schedule"]);
+    expect(html).toContain("<h2>1. 기본 정보</h2>");
+    expect(html).toMatch(/<h2>2\. 일정 및 수행 내용<\/h2><table>.*<\/table>$/);
+    expect(html).not.toContain("세부 교육 내용");
+  });
+
+  it("빈 섹션은 번호 없이 건너뛰어 최종 본문과 번호가 같다", () => {
+    const r = { ...full, schedule: [], education: [] };
+    const done = ["title", "basic", "schedule", "education", "achievements"];
+    const html = renderPartialReportHtml(r, done);
+    expect(html).toMatch(/<h2>2\. 주요 성과<\/h2><ul><li>거점 확보<\/li><\/ul>$/);
+    expect(renderReportHtml(normalizeReport(r))).toContain(html.slice(html.indexOf("<h2>2.")));
+  });
+
+  it("시사점과 향후 계획은 둘 다 끝나야 한 섹션으로 그린다", () => {
+    const upToInsights = keys.slice(0, keys.indexOf("insights") + 1);
+    expect(renderPartialReportHtml(full, upToInsights)).not.toContain("시사점");
+    expect(renderPartialReportHtml(full, [...upToInsights, "plans"])).toContain("<h2>5. 시사점 및 향후 계획</h2><h3>시사점</h3>");
+  });
+
+  it("앞 섹션이 끝나지 않았으면 뒤 섹션을 그리지 않는다(번호를 확정할 수 없다)", () => {
+    expect(renderPartialReportHtml(full, ["title", "basic", "achievements"])).not.toContain("주요 성과");
   });
 });
