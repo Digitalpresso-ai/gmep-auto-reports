@@ -239,32 +239,3 @@ describe("FUNC-1 기안문 원본 보관", () => {
     expect((await file(a.cookie)).status).toBe(404);
   });
 });
-
-describe("FUNC-20 날짜별 보고서 목록", () => {
-  const list = async (cookie?: string, path = "/api/reports") => (await import("@/app/api/reports/route")).GET(request("GET", path, { cookie }));
-
-  it("회사의 보고서를 날짜 내림차순으로 본문 없이 돌려주고 다른 회사 것은 섞지 않는다", async () => {
-    await t.sql`insert into reports (company_id, report_date, title, body_html, updated_at) values
-      (${a.id}, '2026-11-02', '11/2 보고서', '<p>본문 A1</p>', '2026-11-02T09:00:00Z'),
-      (${a.id}, '2026-11-03', '11/3 보고서', '<p>본문 A2</p>', '2026-11-03T09:00:00Z'),
-      (${b.id}, '2026-11-04', 'B사 보고서', '<p>본문 B</p>', '2026-11-04T09:00:00Z')`;
-    const res = await list(a.cookie, `/api/reports?companyId=${b.id}`);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      reports: [
-        { date: "2026-11-03", title: "11/3 보고서", updatedAt: "2026-11-03T09:00:00.000Z" },
-        { date: "2026-11-02", title: "11/2 보고서", updatedAt: "2026-11-02T09:00:00.000Z" },
-      ],
-    });
-    const other = await (await list(b.cookie)).json();
-    expect(other.reports.map((r: { date: string }) => r.date)).toEqual(["2026-11-04"]);
-  });
-
-  it("세션이 없으면 401, 최초 비밀번호를 바꾸기 전이면 403", async () => {
-    expect((await list()).status).toBe(401);
-    const id = await companyWithPassword(t.sql, "목록 잠금 회사", "initial-pass", true);
-    const res = await list(await loginCookie(id, "initial-pass"));
-    expect(res.status).toBe(403);
-    expect((await res.json()).code).toBe("password_change_required");
-  });
-});

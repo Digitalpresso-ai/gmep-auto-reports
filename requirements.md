@@ -36,7 +36,7 @@
 | FUNC-9 | 미리보기 문장 직접 수정(contenteditable), 자동 저장 | p.2 §3 | 1차 | `src/server/sanitize.ts`, `PUT /api/days/[date]/report` / `tests/api/report.test.ts` | 검증됨 |
 | FUNC-10 | 수정 요청 입력 → AI 재작성. 요청이 가리키지 않은 블록은 직접 고친 내용 포함 그대로 두고, 요청이 가리킨 블록은 직접 고친 문장이 있어도 AI가 덮어씀(2026-11-04 사용자 결정, 원문의 "직접 고친 내용 유지"를 바꿈). 지난 수정 요청을 모두 기억해 이어서 해석(예: "아까 바꾼 부분"). 다시 만들면 수정 기록을 지움 | p.2 §3, 2026-11-04 사용자 요청("대화 내용을 다 기억해야 함") | 2차 | `db/migrations/0006_report_revisions.sql`, `src/server/domain/agent.ts` buildAgentRevision, `src/server/generate.ts` reviseReport, `/api/days/[date]/report/revisions`, `Workspace.tsx` / `tests/api/report.test.ts`, `tests/domain/agent.test.ts`, `tests/db/migration.test.ts` | 검증됨(API, 가짜 AI). 덮어쓰기 변경은 가짜 AI로만 확인. 2026-11-04 합성 자료로 실제 AI 생성 1회 + 수정 2회를 로컬 화면에서 확인: 요청한 시사점 섹션만 바뀌고 직접 고친 성과 문장·나머지 섹션은 그대로, 두 번째 요청의 "아까 줄인 것"을 첫 요청 결과로 해석. 실제 자료로는 미확인. 2026-11-04부터 블록 패치(AI-14)로 바꿔, 요청이 가리키지 않은 블록은 직접 넣은 문단을 포함해 바이트 그대로 유지(가짜 AI 테스트·실제 자료 평가로 확인) |
 | FUNC-11 | 일일 보고서 .docx 다운로드(사진 포함). 맑은 고딕, A4, □ · - 개조식 불릿. Word·한글(HWP 뷰어)에서 깨짐 없이 열림 | p.2 §3, p.5 §6-2 | 1차 | `src/server/docx.ts`, `src/app/api/days/[date]/report/docx` / `tests/api/docx.test.ts` | 구현 중(검사 통과, LibreOffice로 열림 확인. Word·한글 실기 미검증) |
-| FUNC-12 | 보관함: 날짜별 보고서 카드, 다시 열기, 확인 후 삭제. 같은 날짜 재생성 시 덮어쓰기 | p.2 §3 | 2차 | 목록·다시 열기는 FUNC-20 | 구현 중(목록·다시 열기는 FUNC-20. 삭제 미구현) |
+| FUNC-12 | 보관함: 날짜별 보고서 카드, 다시 열기, 확인 후 삭제. 같은 날짜 재생성 시 덮어쓰기 | p.2 §3 | 2차 | — | 미구현 |
 | FUNC-13 | 전체 합본: 저장된 일일 보고서를 날짜순으로 .docx 한 파일에 합침 | p.3 §3 | 2차 | — | 미구현 |
 | FUNC-14 | 작성 규칙(프로토타입 문구 재사용): 모든 문장 개조식, "~습니다" 등 서술형 어미 금지 / 입력에 없는 사실(미팅 상대·계약·수치) 생성 금지 / 시사점은 회사 사업·제품 관점 / 참여 사진은 설명 없이 사진만 | p.3 §3 | 1차 | `src/server/domain/prompt.ts` / `tests/domain/report.test.ts` | 구현 중(문구 이전 검증됨. 실제 출력의 개조식 유지는 미검증) |
 | FUNC-15 | PC·모바일 모두 사용. 아이폰 Safari·갤럭시 Chrome에서 사진 업로드·선택·다운로드 | p.3 §3, p.5 §6-2 | 1차 | `src/app/globals.css`, `src/client/*` (모바일 폭·서버 첨부 다운로드) | 미검증(375px 폭 로컬 확인, 아이폰·갤럭시 실기 미검증) |
@@ -44,7 +44,6 @@
 | FUNC-17 | 생성 전 입력(일정 복사본·사진 선택·추가 사진·특이사항)은 회사·날짜별 초안으로 서버에 자동 저장. 다른 기기·재방문 시 그대로 복원 | 2026-11-03 사용자 답변("날짜별 자동 저장"), SHARED-2 | 1차 | `src/server/workspace.ts`, `PUT /api/days/[date]/draft` / `tests/api/company.test.ts` | 검증됨 |
 | FUNC-18 | 같은 날짜 보고서가 있으면 '다시 만들기' 전에 "직접 고친 내용이 사라집니다" 확인. 확인 시 덮어쓰고 생성 1회 차감 | 2026-11-03 사용자 답변("덮어쓰기 확인 후 생성"), FUNC-12 | 1차 | `src/server/generate.ts`, `src/client/company/Workspace.tsx` / `tests/api/report.test.ts` | 검증됨 |
 | FUNC-19 | 보고서 양식(섹션 구성·순서·필수 여부·섹션별 작성 지침)을 데이터로 분리해, 양식이 바뀌어도 생성·수정·미리보기·Word가 같은 코드로 동작. Word 서식 파일 업로드는 범위 밖 | 2026-11-04 사용자 요청("문서 양식이 바뀌어도 잘 작동해야 함", 범위 "섹션·지침까지") | 2차 | `src/server/domain/template.ts` / `tests/domain/template.test.ts` | 구현됨(도메인·AI 수정 경로, 기본 양식 GMEP_DAILY만 사용). 생성(JSON)은 아직 양식 데이터를 쓰지 않음 |
-| FUNC-20 | 회사 입력 화면에 날짜별로 저장된 보고서 목록(날짜·제목, 최근 날짜부터)을 보여 주고, 누르면 그 날짜를 연다. 지금 보는 날짜는 "보는 중"으로 표시. 목록 API는 본문을 보내지 않고 세션의 회사 보고서만 돌려줌(AUTH-8). AI 작업 중에는 날짜 이동 불가. 생성·AI 수정 뒤 목록 갱신. 다시 접속하면 입력 화면에서 시작하는 동작은 유지 | 2026-11-04 사용자 요청("날짜별로 별도로 아카이빙이 되어야 한다"), FUNC-12 | 1차 | `GET /api/reports`, `src/server/workspace.ts` listReports, `src/client/company/Workspace.tsx` / `tests/api/company.test.ts` | 검증됨(API). 화면은 브라우저 미확인 |
 | FUNC-X | 범위 제외: 구글 드라이브 직접 연동(ZIP으로 대체), HWP 읽기 | p.3 §3 | — | — | 제외 |
 
 ## 날짜별 공통 자료

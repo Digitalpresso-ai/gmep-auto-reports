@@ -37,6 +37,5 @@ export type DayView = {
   usage: Usage;
 };
 
-export type ReportSummary = { date: string; title: string; updatedAt: string };
 export type ReportDoc = { title: string; bodyHtml: string; updatedAt: string };
 export type Revision = { request: string; createdAt: string };
