@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, errorText, berlinToday } from "../api";
+import { zonedToday } from "@/lib/time-zone";
+import { ApiError, api, errorText } from "../api";
 import { Companies } from "./Companies";
 import { DayEditor } from "./DayEditor";
 
@@ -23,7 +24,7 @@ export function AdminApp() {
   useEffect(() => {
     // 첫 화면은 관리자 세션 확인 결과로 정한다
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    checkSession().then((ok) => ok && (setDate(berlinToday()), setView("days")));
+    checkSession().then((ok) => ok && (setDate(zonedToday()), setView("days")));
   }, [checkSession]);
 
   async function logout() {
@@ -32,7 +33,7 @@ export function AdminApp() {
   }
 
   if (view === "loading") return <p className="narrow hint"><span className="spin" /> 불러오는 중…</p>;
-  if (view === "login") return <AdminLogin onDone={() => checkSession().then((ok) => ok && (setDate(berlinToday()), setView("days")))} />;
+  if (view === "login") return <AdminLogin onDone={() => checkSession().then((ok) => ok && (setDate(zonedToday()), setView("days")))} />;
 
   return (
     <>

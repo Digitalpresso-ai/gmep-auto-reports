@@ -26,11 +26,6 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
 
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : "요청을 처리하지 못했습니다");
 
-// 행사가 독일에서 열려 보고 일자 기본값은 독일 날짜다. 서버의 하루 사용 횟수도 독일 자정에 다시 센다(AI-9).
-const berlinDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" });
-export function berlinToday(now = new Date()): string {
-  return berlinDate.format(now);
-}
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 export function fmtDate(d: string): string {

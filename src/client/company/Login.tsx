@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { formatTime } from "@/lib/time-zone";
 import { ApiError, api, errorText } from "../api";
 
 type Option = { id: string; label: string };
@@ -67,7 +68,7 @@ export function Login({ onLoggedIn }: { onLoggedIn: (mustChangePassword: boolean
         </label>
         {lockedUntil && (
           <div className="msg msg-err">
-            비밀번호를 5회 틀려 잠겼습니다. {new Date(lockedUntil).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 이후 다시 시도해 주세요.
+            비밀번호를 5회 틀려 잠겼습니다. {formatTime(lockedUntil)} 이후 다시 시도해 주세요.
           </div>
         )}
         {error && <div className="msg msg-err">{error}</div>}
