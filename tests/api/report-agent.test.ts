@@ -358,6 +358,25 @@ describe("runReportAgent", () => {
     expect(requests).toHaveLength(1);
   });
 
+  // Codex 독립 리뷰(v2)에서 재현: 블록은 tool_use가 끝날 때 바로 적용되므로 잘리거나 거절된 턴의 블록이 이미 화면에 나가 있다
+  it.each(["max_tokens", "refusal"])("%s이면 그 턴에 적용한 블록을 되돌리는 reset 이벤트를 보낸다", async (stopReason) => {
+    const doc: BlockDoc = { blocks: [{ id: "b1", html: "<p>원래</p>" }] };
+    const { events } = await run([{ blocks: [tu("r", "replace_paragraph", { id: "b1", text: "고침" })], stopReason }], { doc, followUp: "고쳐 줘" });
+    expect(events.at(-1)).toEqual({ type: "reset", html: "<p>원래</p>" });
+  });
+
+  it("수정 계획(블록 id)에는 섹션 이름 검사를 하지 않는다", async () => {
+    const doc: BlockDoc = { blocks: [{ id: "b1", html: "<p>원래</p>" }] };
+    const { requests } = await run(
+      [
+        { blocks: [plan("p", ["b1"])], stopReason: "tool_use" },
+        { blocks: [finish("f")], stopReason: "tool_use" },
+      ],
+      { doc, followUp: "고쳐 줘" },
+    );
+    expect(toolResults(requests[1].turns[1])[0].content).toBe("ok");
+  });
+
   it("턴 한도를 넘으면 실패로 끝내고 쓴 턴의 사용량을 모두 돌려준다", async () => {
     const { result, requests } = await run(
       [

@@ -160,7 +160,8 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
     spent.push(usage);
     o.onEvent({ type: "turn", n: s.n + 1, usage });
 
-    // 잘렸거나 거절된 턴의 tool 입력은 믿을 수 없다. 이 턴에 적용한 블록은 결과에 쓰지 않고 실패로 끝낸다.
+    // 잘렸거나 거절된 턴의 tool 입력은 믿을 수 없다. 블록은 tool_use가 끝날 때 이미 적용·전송했으므로 화면을 턴 시작 상태로 되돌리고 실패로 끝낸다.
+    if ((res.stopReason === "max_tokens" || res.stopReason === "refusal") && doc !== turnStart) o.onEvent({ type: "reset", html: renderDoc(turnStart) });
     if (res.stopReason === "max_tokens") return { usages: [usage], n: s.n + 1, outcome: { ok: false, reason: "max_tokens" } };
     if (res.stopReason === "refusal") return { usages: [usage], n: s.n + 1, outcome: { ok: false, reason: "refused" } };
 
@@ -178,7 +179,8 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
     for (const c of s.calls) {
       if (c.kind === "invalid") blocks.push(result(c.id, c.error, true));
       else if (c.kind === "plan") {
-        const list = planIssues(o.template, c.sections);
+        // 수정 계획은 섹션 이름이 아니라 바꿀 블록 id를 적으므로(agent.ts buildAgentRevision) 양식 대비 섹션 검사는 생성에만 한다
+        const list = o.doc.blocks.length ? [] : planIssues(o.template, c.sections);
         blocks.push(result(c.id, list.length ? `계획에 문제가 있습니다.\n${list.map((x) => `- ${x}`).join("\n")}` : "ok"));
       } else if (c.kind === "finish") {
         issues = check();
