@@ -3,7 +3,20 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { useDialog } from "../dialog";
 
-type Row = { id: string; name: string; label: string; hasPassword: boolean; mustChangePassword: boolean; lockedUntil: string | null };
+type Row = {
+  id: string;
+  name: string;
+  label: string;
+  hasPassword: boolean;
+  mustChangePassword: boolean;
+  lockedUntil: string | null;
+  generateLimit: number;
+  reviseLimit: number;
+  generateUsed: number;
+  reviseUsed: number;
+};
+// 한도를 정할 대상. row가 없으면 모든 회사에 적용한다.
+type LimitEdit = { row: Row | null; generate: string; revise: string };
 
 // A5 회사 관리(AUTH-9 1차: 추가·이름 수정·초기 비밀번호 발급). 보고서 내용은 보여 주지 않는다(AUTH-10).
 export function Companies() {
@@ -12,6 +25,8 @@ export function Companies() {
   const [error, setError] = useState("");
   const [issued, setIssued] = useState<{ label: string; password: string } | null>(null);
   const [bulk, setBulk] = useState<{ name: string; label: string; password: string }[] | null>(null);
+  const [limitEdit, setLimitEdit] = useState<LimitEdit | null>(null);
+  const [limitError, setLimitError] = useState("");
   const ui = useDialog();
 
   const reload = useCallback(() => api<Row[]>("/api/admin/companies").then(setRows, (e) => setError(errorText(e))), []);
@@ -65,6 +80,30 @@ export function Companies() {
     }
   }
 
+  function openLimits(row: Row | null) {
+    const base = row ?? rows?.[0];
+    setLimitError("");
+    setLimitEdit({ row, generate: String(base?.generateLimit ?? 5), revise: String(base?.reviseLimit ?? 15) });
+  }
+
+  async function saveLimits() {
+    if (!limitEdit) return;
+    const g = Number(limitEdit.generate);
+    const r = Number(limitEdit.revise);
+    const valid = (n: number) => limitEdit.generate !== "" && Number.isInteger(n) && n >= 0 && n <= 100;
+    if (!valid(g) || !valid(r) || limitEdit.revise === "") return setLimitError("0~100 사이 정수로 입력해 주세요");
+    if (!limitEdit.row && !(await ui.confirm(`모든 회사(${rows?.length ?? 0}개사)의 하루 횟수를 생성 ${g}회 · 수정 ${r}회로 바꿀까요?`, "적용"))) return;
+    try {
+      const body = { dailyGenerateLimit: g, dailyReviseLimit: r };
+      if (limitEdit.row) await api(`/api/admin/companies/${limitEdit.row.id}/limits`, { method: "PUT", body });
+      else await api("/api/admin/companies/limits", { method: "PUT", body });
+      setLimitEdit(null);
+      await reload();
+    } catch (err) {
+      setLimitError(errorText(err));
+    }
+  }
+
   const bulkText = (list: NonNullable<typeof bulk>) => list.map((b) => `${b.label}\t${b.password}`).join("\n");
 
   // 엑셀에서 한글이 깨지지 않도록 BOM을 붙인다. 파일은 브라우저에서만 만든다.
@@ -94,12 +133,15 @@ export function Companies() {
         <button type="button" className="btn btn-small" disabled={!missing} onClick={issueMissing}>
           비밀번호 미발급 {missing}개사 일괄 발급
         </button>
+        <button type="button" className="btn btn-small" disabled={!rows?.length} onClick={() => openLimits(null)}>
+          전체 하루 횟수 설정
+        </button>
       </div>
       {error && <div className="msg msg-err">{error}</div>}
       <div className="table-wrap" style={{ marginTop: 16 }}>
         <table className="table table-stack">
           <thead>
-            <tr><th>로그인 표시명</th><th>등록 이름</th><th>상태</th><th /></tr>
+            <tr><th>로그인 표시명</th><th>등록 이름</th><th>상태</th><th>오늘 사용 / 하루 횟수</th><th /></tr>
           </thead>
           <tbody>
             {rows?.map((r) => (
@@ -107,9 +149,13 @@ export function Companies() {
                 <td data-label="로그인 표시명"><b>{r.label}</b></td>
                 <td data-label="등록 이름">{r.name}</td>
                 <td data-label="상태">{state(r)}</td>
+                <td data-label="오늘 사용 / 하루 횟수">
+                  생성 {r.generateUsed}/{r.generateLimit} · 수정 {r.reviseUsed}/{r.reviseLimit}
+                </td>
                 <td className="actions-cell">
                   <div className="row row-end">
                     <button type="button" className="btn btn-small" onClick={() => rename(r)}>이름 수정</button>
+                    <button type="button" className="btn btn-small" onClick={() => openLimits(r)}>횟수 설정</button>
                     <button type="button" className="btn btn-small" onClick={() => issue(r)}>{r.hasPassword ? "비밀번호 재발급" : "초기 비밀번호 발급"}</button>
                   </div>
                 </td>
@@ -129,6 +175,39 @@ export function Companies() {
               <button type="button" className="btn btn-primary" onClick={() => setIssued(null)}>전달했습니다</button>
             </div>
           </div>
+        </div>
+      )}
+      {limitEdit && (
+        <div className="modal-veil" role="dialog" aria-modal="true">
+          <form
+            className="modal"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveLimits();
+            }}
+          >
+            <h3>{limitEdit.row ? `${limitEdit.row.label} 하루 횟수` : "모든 회사 하루 횟수"}</h3>
+            <p style={{ margin: "0 0 12px" }}>
+              오늘 이미 쓴 횟수는 그대로 두고 남은 횟수만 새 한도로 다시 계산합니다. 횟수는 한국 시간 자정에 다시 시작합니다.
+            </p>
+            <div className="row">
+              <label style={{ flex: 1 }}>
+                <span className="hint">보고서 생성</span>
+                <input className="input" type="number" min={0} max={100} step={1} inputMode="numeric" value={limitEdit.generate} onChange={(e) => setLimitEdit({ ...limitEdit, generate: e.target.value })} />
+              </label>
+              <label style={{ flex: 1 }}>
+                <span className="hint">AI 수정</span>
+                <input className="input" type="number" min={0} max={100} step={1} inputMode="numeric" value={limitEdit.revise} onChange={(e) => setLimitEdit({ ...limitEdit, revise: e.target.value })} />
+              </label>
+            </div>
+            {limitError && <div className="msg msg-err">{limitError}</div>}
+            <div className="actions">
+              <button type="button" className="btn" onClick={() => setLimitEdit(null)}>
+                취소
+              </button>
+              <button className="btn btn-primary">저장</button>
+            </div>
+          </form>
         </div>
       )}
       {ui.dialog}
