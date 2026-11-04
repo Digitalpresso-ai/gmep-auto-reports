@@ -4,7 +4,7 @@ import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
 import { ApiError, apiStream, api, errorText, fmtDate, kstToday } from "../api";
 import { useDialog } from "../dialog";
 import { imageForm, toJpeg } from "../files";
-import type { DayView, PhotoRef, Profile, ReportDoc, Revision, Usage } from "./types";
+import type { DayView, PhotoRef, Profile, ReportDoc, ReportSummary, Revision, Usage } from "./types";
 
 type DraftPatch = { scheduleText?: string; selectedPhotos?: PhotoRef[]; notes?: string };
 type Status = { kind: "err" | "ok" | "info" | "warn"; text: string; retry?: boolean } | null;
@@ -40,6 +40,8 @@ export function Workspace({ profile }: { profile: Profile }) {
   const [reportSave, setReportSave] = useState<{ text: string; err: boolean }>({ text: "", err: false });
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [uploading, setUploading] = useState("");
+  // 날짜별로 저장된 보고서 목록. 불러오지 못하면 목록만 숨기고 작성은 그대로 한다.
+  const [archive, setArchive] = useState<ReportSummary[]>([]);
 
   const pendingDraft = useRef<{ date: string; patch: DraftPatch } | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -157,6 +159,19 @@ export function Workspace({ profile }: { profile: Profile }) {
       cancelled = true;
     };
   }, [date, load]);
+
+  const refreshArchive = useCallback(
+    () => api<{ reports: ReportSummary[] }>("/api/reports").then((r) => setArchive(r.reports), () => {}),
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ reports: ReportSummary[] }>("/api/reports").then((r) => !cancelled && setArchive(r.reports), () => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function changeDate(next: string) {
     if (!next || next === date) return;
@@ -348,6 +363,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       setDay((d) => (d ? { ...d, report: { title: r.report.title, updatedAt: r.report.updatedAt } } : d));
       setReportSave({ text: "저장됨", err: false });
       setStage("chat");
+      refreshArchive();
     } catch (e) {
       // 실패하면 서버의 보고서는 그대로다. 그리던 섹션을 지우고 생성 직전 화면(저장한 직접 편집 포함)으로 되돌린다.
       if (before !== null && reportEl.current) {
@@ -383,6 +399,7 @@ export function Workspace({ profile }: { profile: Profile }) {
       setRevisions(r.revisions);
       setDay((d) => (d ? { ...d, report: { title: r.report.title, updatedAt: r.report.updatedAt } } : d));
       setReportSave({ text: "저장됨", err: false });
+      refreshArchive();
     } catch (e) {
       if (e instanceof ApiError && e.code === "limit_reached") setUsage((u) => (u ? { ...u, reviseRemaining: 0 } : u));
       setReviseStatus({ kind: "err", text: errorText(e) });
@@ -471,6 +488,31 @@ export function Workspace({ profile }: { profile: Profile }) {
               </span>
               <span aria-hidden>→</span>
             </button>
+          )}
+
+          {archive.length > 0 && (
+            <details className="block fold">
+              <summary className="block-title">
+                지난 보고서 <span className="opt">{archive.length}개 · 날짜별 보관</span>
+              </summary>
+              <ul className="files">
+                {archive.map((r) => (
+                  <li key={r.date}>
+                    <span className="fcell">
+                      <b>{fmtDate(r.date)}</b>
+                      <span className="fname" title={r.title}>{r.title || "제목 없음"}</span>
+                    </span>
+                    {r.date === date ? (
+                      <span className="chip">보는 중</span>
+                    ) : (
+                      <button type="button" className="btn-link" disabled={aiBusy} onClick={() => changeDate(r.date)}>
+                        열기
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
 
           {loadError && <div className="msg msg-err">{loadError}</div>}
