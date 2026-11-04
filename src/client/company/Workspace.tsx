@@ -656,7 +656,7 @@ export function Workspace({ profile }: { profile: Profile }) {
               </button>
             </div>
             <div className="hint">
-              {reviseLimitReached ? "오늘 수정 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다." : `요청한 부분만 고치고 직접 고친 문장은 그대로 둡니다 · 남은 수정 ${usage?.reviseRemaining ?? 0}/${usage?.reviseLimit ?? 0}회`}
+              {reviseLimitReached ? "오늘 수정 한도를 다 쓰셨습니다. 직접 편집과 Word 다운로드는 계속 쓸 수 있습니다." : `요청한 부분만 다시 씁니다(직접 고친 문장도 바뀔 수 있음) · 남은 수정 ${usage?.reviseRemaining ?? 0}/${usage?.reviseLimit ?? 0}회`}
             </div>
           </div>
         </section>

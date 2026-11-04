@@ -152,9 +152,16 @@ describe("buildAgentRevision", () => {
     expect(buildAgentRevision({ numberedDoc: doc, previousRequests: [], request: "x" })).toContain("(없음)");
   });
 
-  it("바꿀 블록 계획 → 해당 블록만 replace/delete/add(after) → finish, 손대지 않은 블록·직접 고친 문장·지난 수정 유지", () => {
+  it("바꿀 블록 계획 → 해당 블록만 replace/delete/add(after) → finish, 손대지 않은 블록·지난 수정 유지", () => {
     const text = buildAgentRevision({ numberedDoc: doc, previousRequests: [], request: "x" });
-    for (const s of ["plan_outline", "블록 id", "replace_", "delete_block", "after", "finish", "다시 쓰지 않", "직접 고친", "되돌리지", "아까"]) expect(text).toContain(s);
+    for (const s of ["plan_outline", "블록 id", "replace_", "delete_block", "after", "finish", "다시 쓰지 않", "되돌리지", "아까"]) expect(text).toContain(s);
     expect(text).not.toContain("JSON");
+  });
+
+  // 2026-11-04 사용자 결정: 요청이 가리키는 블록은 회사가 직접 고친 문장이 있어도 AI가 덮어쓴다
+  it("직접 고친 문장을 보존하라고 지시하지 않고, 요청한 블록은 직접 고친 문장까지 덮어써도 된다고 지시한다", () => {
+    const text = buildAgentRevision({ numberedDoc: doc, previousRequests: [], request: "x" });
+    expect(text).not.toMatch(/직접 고친 문장은[^\n]*바꾸지 말/);
+    expect(text).toMatch(/직접 고친 문장[^\n]*덮어/);
   });
 });

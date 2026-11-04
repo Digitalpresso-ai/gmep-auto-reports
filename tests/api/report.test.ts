@@ -447,6 +447,16 @@ describe("FUNC-10 AI 수정", () => {
     await t.sql`update companies set daily_revise_limit = 15 where id = ${c.id}`;
   });
 
+  it("요청이 가리킨 블록은 회사가 직접 고친 문장이 있어도 AI 결과로 덮어쓴다", async () => {
+    const id = blockOf(await storedBody(), "회사가 직접 쓴 메모");
+    const list = { id, items: [{ text: "현지 거점 확보", sub: ["코워킹 공간 계약 조건 확인"] }] };
+    streamModel.mockImplementationOnce(turn([plan(id), { name: "replace_list", input: list }, finish]));
+    expect((await revise(c.cookie, { request: "성과 하위 항목을 다시 써 줘" })).status).toBe(200);
+    const stored = await storedBody();
+    expect(stored).not.toContain("회사가 직접 쓴 메모");
+    expect(stored).toContain("코워킹 공간 계약 조건 확인");
+  });
+
   it("다른 회사는 이 회사의 수정 대화를 보거나 이 날짜 보고서를 고칠 수 없다(AUTH-8)", async () => {
     expect((await (await revisions(b.cookie)).json()).revisions).toEqual([]);
     expect((await revise(b.cookie, { request: "침입" })).status).toBe(404);
