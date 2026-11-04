@@ -171,6 +171,15 @@ describe("AI-5 응답 해석 실패", () => {
     const [last] = (await usageRows(a.id)).slice(-1);
     expect(last).toMatchObject({ success: false, input_tokens: 0, output_tokens: 0 });
   });
+
+  it("스트림이 도중에 끊겨도 그때까지 받은 토큰을 실패로 기록한다", async () => {
+    const { ModelStreamError } = await import("@/server/ai");
+    callModel.mockRejectedValueOnce(new ModelStreamError({ input: 12_000, output: 300, cacheRead: 8_000, cacheWrite: 0 }, "claude-sonnet-5-5", new Error("socket hang up")));
+    const res = await generate(a.cookie, { overwrite: true });
+    expect(res.status).toBe(502);
+    const [last] = (await usageRows(a.id)).slice(-1);
+    expect(last).toMatchObject({ success: false, input_tokens: 12_000, output_tokens: 300 });
+  });
 });
 
 describe("AI-9·AI-10 한도", () => {

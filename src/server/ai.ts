@@ -93,28 +93,34 @@ async function streamText(c: Anthropic, req: ModelRequest, onText: (snapshot: st
     cacheRead = u.cache_read_input_tokens ?? cacheRead;
     cacheWrite = u.cache_creation_input_tokens ?? cacheWrite;
   };
-  for await (const ev of stream) {
-    switch (ev.type) {
-      case "message_start":
-        model = ev.message.model;
-        setUsage(ev.message.usage);
-        break;
-      case "content_block_start": {
-        const b = ev.content_block as unknown as AnyBlock;
-        if (b.type === "fallback") model = (b.to as { model: string }).model;
-        break;
-      }
-      case "content_block_delta":
-        if (ev.delta.type === "text_delta") {
-          text += ev.delta.text;
-          onText(text);
+  // 도중에 끊기면 그때까지 받은 사용량을 실어 던진다. 실패한 호출도 쓴 토큰은 기록해야 한다(AI-12).
+  try {
+    for await (const ev of stream) {
+      switch (ev.type) {
+        case "message_start":
+          model = ev.message.model;
+          setUsage(ev.message.usage);
+          break;
+        case "content_block_start": {
+          const b = ev.content_block as unknown as AnyBlock;
+          if (b.type === "fallback") model = (b.to as { model: string }).model;
+          break;
         }
-        break;
-      case "message_delta":
-        stopReason = ev.delta.stop_reason;
-        setUsage(ev.usage);
-        break;
+        case "content_block_delta":
+          if (ev.delta.type === "text_delta") {
+            text += ev.delta.text;
+            onText(text);
+          }
+          break;
+        case "message_delta":
+          stopReason = ev.delta.stop_reason;
+          setUsage(ev.usage);
+          break;
+      }
     }
+  } catch (e) {
+    const got = input + output + cacheRead + cacheWrite > 0;
+    throw new ModelStreamError(got ? { input: input + cacheRead + cacheWrite, output, cacheRead, cacheWrite } : null, model, e);
   }
   return {
     text: stopReason === "refusal" ? "" : text,

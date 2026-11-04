@@ -183,7 +183,18 @@ async function callForReport(
       result = await callModel(preview ? { ...req, onText: preview.onText } : req);
     } catch (e) {
       console.error("AI 호출 실패", { companyId, kind, error: e instanceof Error ? e.message : String(e) });
-      await recordUsage({ companyId, kind, model: req.model, inputTokens: 0, outputTokens: 0, success: false });
+      // 스트림이 도중에 끊기면 그때까지 받은 토큰을 기록한다
+      const u = e instanceof ModelStreamError ? e.usage : null;
+      await recordUsage({
+        companyId,
+        kind,
+        model: (e instanceof ModelStreamError && e.model) || req.model,
+        inputTokens: u?.input ?? 0,
+        outputTokens: u?.output ?? 0,
+        cacheReadTokens: u?.cacheRead ?? 0,
+        cacheWriteTokens: u?.cacheWrite ?? 0,
+        success: false,
+      });
       return "ai_failed";
     }
     const parsed = parseModelJson(result.text);

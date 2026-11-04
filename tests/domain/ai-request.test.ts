@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { callModel, userContent } from "@/server/ai";
+import { ModelStreamError, callModel, userContent } from "@/server/ai";
 
 // SDK 클라이언트만 가짜로 바꾸고 callModel의 이벤트 해석은 실제로 돌린다
 const create = vi.hoisted(() => vi.fn());
@@ -61,6 +61,21 @@ describe("생성 응답 스트리밍", () => {
       cacheReadTokens: 20_000,
       cacheWriteTokens: 9_000,
     });
+  });
+
+  // 독립 리뷰(gen-stream-v1)에서 재현: 사용량을 받은 뒤 스트림이 끊기면 그 토큰이 0으로 기록됐다
+  it("스트림이 도중에 끊기면 그때까지 받은 사용량과 모델을 담은 ModelStreamError를 던진다", async () => {
+    async function* broken() {
+      yield start();
+      yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+      yield text(0, "{");
+      throw new Error("socket hang up");
+    }
+    create.mockResolvedValueOnce(broken());
+    const err = await callModel({ model: "m", prompt: "p", images: [], onText: () => {} }).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelStreamError);
+    expect(err.usage).toEqual({ input: 29_100, output: 1, cacheRead: 20_000, cacheWrite: 9_000 });
+    expect(err.model).toBe("claude-sonnet-5-5");
   });
 
   it("거절로 끝나면 받은 텍스트를 버린다", async () => {
