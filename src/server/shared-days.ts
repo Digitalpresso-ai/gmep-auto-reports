@@ -6,7 +6,7 @@ import { removeObjects, signedUrls } from "./storage";
 export const MAX_SCHEDULE_CHARS = 20_000;
 export const MAX_MATERIAL_CHARS = 200_000;
 
-export type SharedFile = { id: string; kind: "schedule_image" | "photo"; filename: string; width: number; height: number; url: string; storagePath: string; description: string | null };
+export type SharedFile = { id: string; kind: "schedule_image" | "photo"; filename: string; width: number; height: number; url: string; storagePath: string };
 export type SharedMaterial = { id: string; kind: "schedule" | "education"; filename: string; chars: number; hasOriginal: boolean };
 export type SharedDay = { date: string; scheduleText: string; files: SharedFile[]; materials: SharedMaterial[] };
 
@@ -24,15 +24,15 @@ export async function getSharedDay(date: string): Promise<SharedDay | null> {
   const sql = db();
   const [day] = await sql<{ schedule_text: string }[]>`select schedule_text from shared_days where report_date = ${date}`;
   if (!day) return null;
-  const files = await sql<{ id: string; kind: SharedFile["kind"]; filename: string; width: number; height: number; storage_path: string; description: string | null }[]>`
-    select id, kind, filename, width, height, storage_path, description from shared_files where report_date = ${date} order by created_at, id`;
+  const files = await sql<{ id: string; kind: SharedFile["kind"]; filename: string; width: number; height: number; storage_path: string }[]>`
+    select id, kind, filename, width, height, storage_path from shared_files where report_date = ${date} order by created_at, id`;
   const materials = await sql<SharedMaterial[]>`
     select id, kind, filename, char_length(text_content)::int as chars, (storage_path is not null) as "hasOriginal" from shared_materials where report_date = ${date} order by created_at, id`;
   const urls = await signedUrls(files.map((f) => f.storage_path));
   return {
     date,
     scheduleText: day.schedule_text,
-    files: files.map((f) => ({ id: f.id, kind: f.kind, filename: f.filename, width: f.width, height: f.height, storagePath: f.storage_path, description: f.description, url: urls.get(f.storage_path) ?? "" })),
+    files: files.map((f) => ({ id: f.id, kind: f.kind, filename: f.filename, width: f.width, height: f.height, storagePath: f.storage_path, url: urls.get(f.storage_path) ?? "" })),
     materials: [...materials],
   };
 }

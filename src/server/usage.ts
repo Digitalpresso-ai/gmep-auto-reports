@@ -26,10 +26,10 @@ export async function usageCounts(companyId: string, now = new Date()): Promise<
   };
 }
 
-/** 공통 사진 설명(photo_describe)은 회사 없이(companyId: null) 기록한다. */
+// ai_usage에는 2026-11-04까지 쓰던 공통 사진 설명(kind photo_describe, company_id null) 기록이 남아 있다. 지금은 생성·수정만 기록한다.
 export type UsageEntry = {
-  companyId: string | null;
-  kind: "generate" | "revise" | "photo_describe";
+  companyId: string;
+  kind: "generate" | "revise";
   model: string;
   inputTokens: number;
   outputTokens: number;

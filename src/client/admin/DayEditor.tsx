@@ -8,7 +8,7 @@ import { extractText, imageForm, toJpeg, unzip, uploadOriginal } from "../files"
 type SharedDay = {
   date: string;
   scheduleText: string;
-  files: { id: string; kind: "photo" | "schedule_image"; filename: string; url: string; description: string | null }[];
+  files: { id: string; kind: "photo" | "schedule_image"; filename: string; url: string }[];
   materials: { id: string; kind: "schedule" | "education"; filename: string; chars: number; hasOriginal: boolean }[];
 };
 type Progress = { done: number; total: number; current: string };
@@ -26,7 +26,6 @@ export function DayEditor({ date }: { date: string }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
-  const [describing, setDescribing] = useState(false);
   const ui = useDialog();
 
   const reload = useCallback(async () => {
@@ -118,44 +117,6 @@ export function DayEditor({ date }: { date: string }) {
     setProgress(null);
     setResult(r);
     await reload().catch(() => {});
-    if (r.counts.photo > 0) await watchDescriptions();
-  }
-
-  // 서버가 사진마다 업로드 응답 뒤 설명을 저장한다(PHOTO-1). 화면은 설명 수가 늘어나는 동안만 다시 불러와 보여 준다.
-  async function watchDescriptions() {
-    setDescribing(true);
-    let left = Infinity;
-    let stalled = 0;
-    while (stalled < 10) {
-      const d = await reload().catch(() => null);
-      const n = d?.files.filter((f) => f.kind === "photo" && f.description === null).length ?? 0;
-      if (n === 0) break;
-      stalled = n < left ? 0 : stalled + 1;
-      left = Math.min(left, n);
-      await new Promise((r) => setTimeout(r, 3000));
-    }
-    setDescribing(false);
-  }
-
-  // 업로드 뒤 설명에 실패했거나 기능 이전에 올린 사진을 다시 설명한다(PHOTO-1). 한 번 부를 때 몇 장씩 처리하므로 남은 것이 없거나 더 진행되지 않을 때까지 반복한다.
-  async function describePhotos() {
-    setError("");
-    try {
-      for (;;) {
-        setProgress({ done: 0, total: 0, current: "사진 설명 만드는 중… (보고서에서 사진을 알맞은 항목 옆에 넣는 데 씁니다)" });
-        const r = await api<{ described: number; failed: number; remaining: number }>(`/api/admin/days/${date}/files/describe`, { method: "POST" });
-        await reload().catch(() => {});
-        if (r.remaining === 0) break;
-        if (r.described === 0) {
-          setError(`사진 ${r.remaining}장의 설명을 만들지 못했습니다. 잠시 뒤 '사진 설명 만들기'를 다시 눌러 주세요`);
-          break;
-        }
-      }
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setProgress(null);
-    }
   }
 
   async function download(id: string) {
@@ -179,7 +140,6 @@ export function DayEditor({ date }: { date: string }) {
 
   const busy = progress !== null;
   const photos = day?.files.filter((f) => f.kind === "photo") ?? [];
-  const undescribed = photos.filter((f) => f.description === null).length;
   const schedImages = day?.files.filter((f) => f.kind === "schedule_image") ?? [];
   const drop = (label: string, accept: string, forced?: Exclude<FileKind, "ignore">) => (
     <label className="drop">
@@ -268,20 +228,13 @@ export function DayEditor({ date }: { date: string }) {
         </div>
         <div>
           <div className="field">
-            <span>공통 사진 {photos.length}장{photos.length > 0 && ` · 설명 ${photos.length - undescribed}장`}</span>
+            <span>공통 사진 {photos.length}장</span>
             {drop("사진 추가", "image/*", "photo")}
-            {describing && undescribed > 0 && <div className="msg msg-info"><span className="spin" /> 사진 설명 저장 중 · 설명 없는 사진 {undescribed}장</div>}
-            {undescribed > 0 && !busy && !describing && (
-              <div className="row" style={{ marginTop: 8 }}>
-                <button type="button" className="btn btn-small" onClick={describePhotos}>사진 설명 만들기 ({undescribed}장)</button>
-                <span className="hint">설명이 없는 사진은 보고서의 참여 사진 칸에만 들어갑니다</span>
-              </div>
-            )}
             <div className="thumbs thumbs-wide">
               {photos.map((f) => (
                 <div key={f.id} className="thumb" style={{ cursor: "default" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={f.url} alt={f.description ?? f.filename} title={f.description ?? "설명 없음"} loading="lazy" />
+                  <img src={f.url} alt={f.filename} title={f.filename} loading="lazy" />
                   <button type="button" className="thumb-del" aria-label="사진 지우기" onClick={() => remove(`/api/admin/days/${date}/files/${f.id}`)}>✕</button>
                 </div>
               ))}

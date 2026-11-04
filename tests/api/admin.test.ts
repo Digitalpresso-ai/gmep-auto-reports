@@ -10,9 +10,6 @@ vi.mock("@/server/ai", () => ({ callModel: (r: ModelRequest) => callModel(r) }))
 // 응답 뒤 작업은 모아 두었다가 테스트가 원할 때 실행한다
 const background: (() => Promise<void>)[] = [];
 vi.mock("@/server/background", () => ({ afterResponse: (fn: () => Promise<void>) => void background.push(fn) }));
-const runBackground = async () => {
-  while (background.length) await background.shift()!();
-};
 
 let t: TestDb;
 let admin: string;
@@ -213,88 +210,14 @@ describe("FUNC-5 교육자료 원본 보관", () => {
   });
 });
 
-describe("PHOTO-1 공통 사진 설명", () => {
-  const date = "2026-11-09";
-  const describeAll = async (cookie = admin) =>
-    (await import("@/app/api/admin/days/[date]/files/describe/route")).POST(request("POST", "/x", { cookie }), params({ date }));
-  const answer = (text: string): ModelResult => ({ text, inputTokens: 900, outputTokens: 80, model: "claude-sonnet-5-5", stopReason: "end_turn", cacheReadTokens: 0, cacheWriteTokens: 0 });
-
-  it("설명이 없는 공통 사진만 사진 이미지와 함께 AI에 보내 설명을 저장한다. 일정 이미지는 설명하지 않는다", async () => {
-    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
-    for (const kind of ["photo", "photo", "schedule_image"]) await POST(request("POST", "/x", { cookie: admin, form: photoForm(kind) }), params({ date }));
-    callModel.mockReset();
-    callModel
-      .mockResolvedValueOnce(answer(JSON.stringify({ scene: "강연장에서 발표 중인 장면", activity: "강연", visible_text: "Doing Business in Germany" })))
-      .mockRejectedValueOnce(new Error("overloaded"));
-    const res = await describeAll();
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ described: 1, failed: 1, remaining: 1 });
-    expect(callModel).toHaveBeenCalledTimes(2);
-    expect(callModel.mock.calls[0][0].images).toHaveLength(1);
-    expect(callModel.mock.calls[0][0].jsonSchema).toBeDefined();
-    const rows = await t.sql<{ kind: string; description: string | null }[]>`select kind, description from shared_files where report_date = ${date} order by kind, description nulls last`;
-    expect(rows).toEqual([
-      { kind: "photo", description: '[강연] 강연장에서 발표 중인 장면 화면 글자: "Doing Business in Germany"' },
-      { kind: "photo", description: null },
-      { kind: "schedule_image", description: null },
-    ]);
-  });
-
-  it("실패해 남은 사진은 다시 부르면 그것만 설명한다", async () => {
-    callModel.mockReset();
-    callModel.mockResolvedValueOnce(answer(JSON.stringify({ scene: "단체 사진", activity: "단체사진", visible_text: "" })));
-    expect(await (await describeAll()).json()).toEqual({ described: 1, failed: 0, remaining: 0 });
-    expect(callModel).toHaveBeenCalledTimes(1);
-  });
-
-  it("공통 사진을 올리면 응답 뒤 바로 그 사진의 설명을 저장한다. 일정 이미지는 설명하지 않는다", async () => {
-    await runBackground();
-    callModel.mockReset();
-    callModel.mockResolvedValue(answer(JSON.stringify({ scene: "네트워킹 장면", activity: "네트워킹", visible_text: "" })));
-    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
-    const photo = await (await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: "2026-11-10" }))).json();
-    const sched = await (await POST(request("POST", "/x", { cookie: admin, form: photoForm("schedule_image") }), params({ date: "2026-11-10" }))).json();
-    await runBackground();
-    expect(callModel).toHaveBeenCalledTimes(1);
-    const rows = await t.sql<{ id: string; description: string | null }[]>`select id, description from shared_files where id in (${photo.id}, ${sched.id})`;
-    expect(Object.fromEntries(rows.map((r) => [r.id, r.description]))).toEqual({ [photo.id]: "[네트워킹] 네트워킹 장면", [sched.id]: null });
-  });
-
-  it("업로드 뒤 설명이 실패해도 업로드는 성공하고 사진은 설명 없이 남는다", async () => {
-    callModel.mockReset();
-    callModel.mockRejectedValue(new Error("overloaded"));
-    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
-    const res = await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: "2026-11-11" }));
-    expect(res.status).toBe(201);
-    await runBackground();
-    const [row] = await t.sql`select description from shared_files where id = ${(await res.json()).id}`;
-    expect(row.description).toBeNull();
-  });
-
-  it("설명 호출마다 회사 없이 사용량을 기록하고, 실패한 호출도 기록한다(AI-12)", async () => {
-    await runBackground();
-    const day = "2026-11-12";
-    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
-    for (let n = 0; n < 3; n++) await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: day }));
+describe("PHOTO-1 공통 사진은 AI로 설명하지 않음", () => {
+  it("공통 사진을 올려도 AI를 부르지 않고 응답 뒤 작업도 남기지 않는다", async () => {
     background.length = 0;
-    await t.sql`delete from ai_usage where kind = 'photo_describe'`;
     callModel.mockReset();
-    callModel
-      .mockResolvedValueOnce(answer(JSON.stringify({ scene: "강연 장면", activity: "강연", visible_text: "" })))
-      .mockResolvedValueOnce(answer("설명할 수 없습니다"))
-      .mockRejectedValueOnce(new Error("overloaded"));
-    const res = await (await import("@/app/api/admin/days/[date]/files/describe/route")).POST(request("POST", "/x", { cookie: admin }), params({ date: day }));
-    expect(await res.json()).toEqual({ described: 1, failed: 2, remaining: 2 });
-    const rows = await t.sql`
-      select company_id, model, input_tokens, output_tokens, success from ai_usage where kind = 'photo_describe' order by success desc, input_tokens desc`;
-    expect(rows).toEqual([
-      { company_id: null, model: "claude-sonnet-5-5", input_tokens: 900, output_tokens: 80, success: true },
-      { company_id: null, model: "claude-sonnet-5-5", input_tokens: 900, output_tokens: 80, success: false },
-      { company_id: null, model: expect.any(String), input_tokens: 0, output_tokens: 0, success: false },
-    ]);
-  });
-
-  it("관리자 쿠키가 없으면 401이다", async () => {
-    expect((await describeAll("")).status).toBe(401);
+    const { POST } = await import("@/app/api/admin/days/[date]/files/route");
+    const res = await POST(request("POST", "/x", { cookie: admin, form: photoForm("photo") }), params({ date: "2026-11-09" }));
+    expect(res.status).toBe(201);
+    expect(background).toHaveLength(0);
+    expect(callModel).not.toHaveBeenCalled();
   });
 });
