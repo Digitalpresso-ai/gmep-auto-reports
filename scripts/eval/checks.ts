@@ -36,3 +36,15 @@ export function checkReport(r: Report) {
     totalChars: all.join("").length,
   };
 }
+
+/** 생성 방식(json·blocks)과 상관없이 HTML만으로 내는 분량·형식 수치. 방식끼리 비교할 때는 이 값을 쓴다. */
+export function checkHtml(html: string) {
+  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return {
+    h2: (html.match(/<h2[\s>]/g) ?? []).length,
+    h3: (html.match(/<h3[\s>]/g) ?? []).length,
+    li: (html.match(/<li[\s>]/g) ?? []).length,
+    dateFormatOk: text.includes("2026. 11. 2.(월)"),
+    textChars: text.replace(/\s/g, "").length,
+  };
+}

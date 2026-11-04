@@ -85,18 +85,23 @@ export async function loadDay() {
     return out;
   });
   const proposalText = await cached("proposal.json", () => extract(PROPOSAL_PDF));
-  // 브라우저처럼 긴 변 1,100px JPEG로 줄인다(FUNC-6)
-  const photoDir = path.join(CACHE, "photos");
-  fs.mkdirSync(photoDir, { recursive: true });
-  const photos: EvalPhoto[] = byKind("photo").map((f) => {
-    const jpgPath = path.join(photoDir, path.basename(f).replace(/\.[^.]+$/, "") + ".jpg");
+  // 브라우저처럼 긴 변 1,100px JPEG로 줄인다(FUNC-6). 일정 이미지도 관리자 화면에서 같은 방식으로 줄여 올린다.
+  const toJpg = (dir: string) => (f: string): EvalPhoto => {
+    fs.mkdirSync(dir, { recursive: true });
+    const jpgPath = path.join(dir, path.basename(f).replace(/\.[^.]+$/, "") + ".jpg");
     if (!fs.existsSync(jpgPath)) execFileSync("sips", ["-Z", "1100", "-s", "format", "jpeg", "-s", "formatOptions", "78", f, "--out", jpgPath], { stdio: "ignore" });
     const info = execFileSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", jpgPath], { encoding: "utf8" });
     const num = (k: string) => Number(info.match(new RegExp(`${k}: (\\d+)`))![1]);
     return { file: path.basename(f), jpgPath, width: num("pixelWidth"), height: num("pixelHeight") };
-  });
+  };
+  const photos = byKind("photo").map(toJpg(path.join(CACHE, "photos")));
+  // 운영은 일정 이미지를 최대 8장까지 보낸다(src/server/generate.ts MAX_SCHEDULE_IMAGES)
+  const scheduleImages = byKind("schedule_image").slice(0, 8).map(toJpg(path.join(CACHE, "schedule-images")));
+  // 관리자가 입력하는 그날 일정 텍스트(shared_days.schedule_text). 자료 폴더에는 없으므로 파일로 줄 때만 쓴다.
+  const scheduleTextFile = process.env.EVAL_SCHEDULE_TEXT_FILE;
+  const scheduleText = scheduleTextFile ? fs.readFileSync(scheduleTextFile, "utf8") : "";
   const ignored = files.filter((f) => classifyFile(path.basename(f)) === "ignore").map((f) => path.basename(f));
-  return { materials, proposalText, photos, ignored };
+  return { materials, proposalText, photos, scheduleImages, scheduleText, ignored };
 }
 
 // 평가용 회사 정보. 사업 소개는 기안문에 적힌 범위만 쓴다(없는 사실을 넣으면 시사점 평가가 왜곡된다).
