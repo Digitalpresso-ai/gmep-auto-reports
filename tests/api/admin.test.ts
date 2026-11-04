@@ -72,7 +72,7 @@ describe("AUTH-9 회사 추가·이름 수정·초기 비밀번호 발급", () =
   it("목록에는 보고서·기안문 내용이 없다(AUTH-10)", async () => {
     const { GET } = await import("@/app/api/admin/companies/route");
     const [row] = await (await GET(request("GET", "/api/admin/companies", { cookie: admin }))).json();
-    expect(Object.keys(row).sort()).toEqual(["hasPassword", "id", "label", "lockedUntil", "mustChangePassword", "name"]);
+    expect(Object.keys(row).sort()).toEqual(["generateLimit", "generateUsed", "hasPassword", "id", "label", "lockedUntil", "mustChangePassword", "name", "reviseLimit", "reviseUsed"]);
   });
 
   it("이름을 고친다", async () => {
@@ -113,6 +113,61 @@ describe("AUTH-9 회사 추가·이름 수정·초기 비밀번호 발급", () =
     expect(await r.json()).toEqual({ mustChangePassword: true });
 
     expect(await (await POST(request("POST", "/x", { cookie: admin }))).json()).toEqual({ issued: [] });
+  });
+});
+
+describe("AI-9 관리자가 회사별 하루 생성·수정 횟수를 정함", () => {
+  const list = async () => {
+    const { GET } = await import("@/app/api/admin/companies/route");
+    return (await (await GET(request("GET", "/api/admin/companies", { cookie: admin }))).json()) as { id: string; generateLimit: number; reviseLimit: number; generateUsed: number; reviseUsed: number }[];
+  };
+  const setOne = async (id: string, body: unknown, cookie = admin) => {
+    const { PUT } = await import("@/app/api/admin/companies/[id]/limits/route");
+    return PUT(request("PUT", "/x", { cookie, body }), params({ id }));
+  };
+  const setAll = async (body: unknown, cookie = admin) => {
+    const { PUT } = await import("@/app/api/admin/companies/limits/route");
+    return PUT(request("PUT", "/x", { cookie, body }));
+  };
+
+  it("목록에 회사별 한도와 오늘 성공한 생성·수정 횟수를 보여 준다", async () => {
+    const id = await companyWithPassword(t.sql, "주식회사 한도회사", "limit-pass");
+    await t.sql`insert into ai_usage (company_id, kind, model, success) values (${id}, 'generate', 'm', true), (${id}, 'generate', 'm', false), (${id}, 'revise', 'm', true)`;
+    expect((await list()).find((c) => c.id === id)).toMatchObject({ generateLimit: 5, reviseLimit: 15, generateUsed: 1, reviseUsed: 1 });
+  });
+
+  it("한 회사의 한도를 바꾸면 그 회사 화면의 남은 횟수에 반영되고 다른 회사는 그대로다", async () => {
+    const [{ id }] = await t.sql`select id from companies where name = '주식회사 한도회사'`;
+    const before = await list();
+    expect((await setOne(id, { dailyGenerateLimit: 8, dailyReviseLimit: 20 })).status).toBe(200);
+    const after = await list();
+    expect(after.find((c) => c.id === id)).toMatchObject({ generateLimit: 8, reviseLimit: 20 });
+    for (const c of before.filter((c) => c.id !== id)) expect(after.find((a) => a.id === c.id)).toMatchObject({ generateLimit: c.generateLimit, reviseLimit: c.reviseLimit });
+
+    const cookie = await loginCookie(id, "limit-pass");
+    const { GET } = await import("@/app/api/days/[date]/route");
+    const day = await (await GET(request("GET", "/x", { cookie }), params({ date: "2026-11-02" }))).json();
+    expect(day.usage).toMatchObject({ generateLimit: 8, reviseLimit: 20 });
+  });
+
+  it("0~100 정수가 아니면 거부하고, 없는 회사는 404, 관리자가 아니면 401이다", async () => {
+    const [{ id }] = await t.sql`select id from companies where name = '주식회사 한도회사'`;
+    for (const bad of [{ dailyGenerateLimit: -1, dailyReviseLimit: 5 }, { dailyGenerateLimit: 1.5, dailyReviseLimit: 5 }, { dailyGenerateLimit: "5", dailyReviseLimit: 5 }, { dailyGenerateLimit: 5, dailyReviseLimit: 101 }, { dailyGenerateLimit: 5 }]) {
+      expect((await setOne(id, bad)).status).toBe(400);
+      expect((await setAll(bad)).status).toBe(400);
+    }
+    expect((await setOne("00000000-0000-0000-0000-000000000000", { dailyGenerateLimit: 1, dailyReviseLimit: 1 })).status).toBe(404);
+    const company = await loginCookie(id, "limit-pass");
+    expect((await setOne(id, { dailyGenerateLimit: 99, dailyReviseLimit: 99 }, company)).status).toBe(401);
+    expect((await setAll({ dailyGenerateLimit: 99, dailyReviseLimit: 99 }, company)).status).toBe(401);
+    expect((await list()).find((c) => c.id === id)).toMatchObject({ generateLimit: 8, reviseLimit: 20 });
+  });
+
+  it("모든 회사에 같은 한도를 한 번에 적용한다", async () => {
+    expect((await setAll({ dailyGenerateLimit: 3, dailyReviseLimit: 10 })).status).toBe(200);
+    const rows = await list();
+    expect(rows.length).toBeGreaterThan(1);
+    for (const c of rows) expect(c).toMatchObject({ generateLimit: 3, reviseLimit: 10 });
   });
 });
 

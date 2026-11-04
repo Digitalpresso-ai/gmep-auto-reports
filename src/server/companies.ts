@@ -3,6 +3,8 @@ import { randomBytes } from "node:crypto";
 import { hashPassword } from "./auth";
 import { db } from "./db";
 import { displayName, sortForLogin } from "./domain/company-name";
+import { kstToday } from "./domain/dates";
+import type { DailyLimits } from "./domain/usage";
 
 export type CompanyProfile = {
   id: string;
@@ -35,9 +37,26 @@ export async function getCompanyProfile(companyId: string): Promise<CompanyProfi
 // ---------- 관리자 회사 관리(AUTH-9). 보고서·기안문 내용은 넣지 않는다(AUTH-10). ----------
 
 export async function listCompaniesForAdmin() {
-  const rows = await db()<{ id: string; name: string; has_password: boolean; must_change_password: boolean; locked_until: Date | null }[]>`
+  // 오늘 성공한 생성·수정 횟수는 회사 화면의 남은 횟수와 같은 기준(KST 하루, 성공만)으로 센다(AI-9)
+  const dayStart = new Date(`${kstToday()}T00:00:00+09:00`);
+  const rows = await db()<
+    {
+      id: string;
+      name: string;
+      has_password: boolean;
+      must_change_password: boolean;
+      locked_until: Date | null;
+      daily_generate_limit: number;
+      daily_revise_limit: number;
+      generate_used: number;
+      revise_used: number;
+    }[]
+  >`
     select c.id, c.name, (c.password_hash is not null) as has_password, c.must_change_password,
-           case when a.locked_until > now() then a.locked_until end as locked_until
+           case when a.locked_until > now() then a.locked_until end as locked_until,
+           c.daily_generate_limit, c.daily_revise_limit,
+           (select count(*)::int from ai_usage u where u.company_id = c.id and u.kind = 'generate' and u.success and u.created_at >= ${dayStart}) as generate_used,
+           (select count(*)::int from ai_usage u where u.company_id = c.id and u.kind = 'revise' and u.success and u.created_at >= ${dayStart}) as revise_used
     from companies c left join login_attempts a on a.company_id = c.id`;
   const order = new Map(sortForLogin(rows).map((c, i) => [c.id, i]));
   return rows
@@ -49,7 +68,21 @@ export async function listCompaniesForAdmin() {
       hasPassword: r.has_password,
       mustChangePassword: r.must_change_password,
       lockedUntil: r.locked_until?.toISOString() ?? null,
+      generateLimit: r.daily_generate_limit,
+      reviseLimit: r.daily_revise_limit,
+      generateUsed: r.generate_used,
+      reviseUsed: r.revise_used,
     }));
+}
+
+export async function setCompanyLimits(id: string, l: DailyLimits): Promise<boolean> {
+  const rows = await db()`update companies set daily_generate_limit = ${l.dailyGenerateLimit}, daily_revise_limit = ${l.dailyReviseLimit}, updated_at = now()
+                          where id = ${id} returning id`;
+  return rows.length > 0;
+}
+
+export async function setAllCompanyLimits(l: DailyLimits): Promise<void> {
+  await db()`update companies set daily_generate_limit = ${l.dailyGenerateLimit}, daily_revise_limit = ${l.dailyReviseLimit}, updated_at = now()`;
 }
 
 export async function addCompany(name: string): Promise<string | null> {
