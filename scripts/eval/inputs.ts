@@ -1,28 +1,13 @@
 // run.eval.ts와 revise.eval.ts가 같은 생성 입력을 쓰게 한다. 프롬프트가 바이트 단위로 같아야 수정 평가가 생성의 캐시를 읽는다.
 import fs from "node:fs";
-import path from "node:path";
-import { describeImage } from "@/server/photo-describe";
-import { COMPANY, DATE, OUT_ROOT, loadDay, type EvalPhoto } from "./fixture";
+import { COMPANY, DATE, loadDay } from "./fixture";
 import type { GenerateInput } from "./generators";
 
 // 회사가 고를 법한 장수. 공통 사진 중 고르게 8장을 고른다.
 const SELECT = 8;
 
-// 관리자 업로드 때 한 번만 만드는 설명이므로 라운드끼리 캐시를 같이 쓴다. 캐시에 없는 사진만 실제로 호출한다.
-async function descriptions(model: string, photos: EvalPhoto[]): Promise<Record<string, string>> {
-  const f = path.join(OUT_ROOT, "_cache", "photo-descriptions.json");
-  const cache: Record<string, string> = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : {};
-  const todo = photos.filter((p) => !cache[p.file]);
-  for (let i = 0; i < todo.length; i += 6) {
-    await Promise.all(todo.slice(i, i + 6).map(async (p) => (cache[p.file] = await describeImage(model, new Uint8Array(fs.readFileSync(p.jpgPath)), "image/jpeg"))));
-    fs.writeFileSync(f, JSON.stringify(cache, null, 1));
-  }
-  return cache;
-}
-
 export async function evalInput(model: string) {
   const day = await loadDay();
-  const desc = await descriptions(model, day.photos);
   const step = Math.floor(day.photos.length / SELECT);
   const selected = Array.from({ length: SELECT }, (_, i) => day.photos[i * step]);
   const photoKeys = selected.map((p) => `shared:${p.file}`);
@@ -41,7 +26,6 @@ export async function evalInput(model: string) {
       educationMaterials: day.materials.filter((m) => m.kind === "education"),
       notes: "",
       hasScheduleImages: day.scheduleImages.length > 0,
-      photos: selected.map((p) => ({ description: desc[p.file] ?? "" })),
     },
   };
   // 운영과 다른 입력을 결과에 남긴다. 자료 폴더에 일정 이미지·일정 텍스트가 없으면 운영보다 입력이 적다.
@@ -54,5 +38,5 @@ export async function evalInput(model: string) {
       "특이사항(notes) 비움",
     ].filter(Boolean),
   };
-  return { input, selected, desc, ignored: day.ignored, inputs };
+  return { input, selected, ignored: day.ignored, inputs };
 }

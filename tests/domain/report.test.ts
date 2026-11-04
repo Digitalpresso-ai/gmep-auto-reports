@@ -13,7 +13,6 @@ const base: PromptInput = {
   educationMaterials: [],
   notes: "",
   hasScheduleImages: false,
-  photos: [],
 };
 
 describe("AI-4·FUNC-14 프롬프트", () => {
@@ -56,15 +55,13 @@ describe("AI-4·FUNC-14 프롬프트", () => {
   });
 });
 
-describe("PHOTO-2 사진 설명 전달", () => {
-  it("선택 순서대로 사진 번호와 관리자가 만든 설명을 넣고, 설명이 없는 사진은 그렇게 적는다", () => {
-    const p = buildPrompt({ ...base, photos: [{ description: "강연 슬라이드 'Doing Business in Germany' 앞 발표자" }, { description: "" }] });
-    expect(p).toContain("[사진 1] 강연 슬라이드 'Doing Business in Germany' 앞 발표자\n[사진 2] (설명 없음)");
-    expect(p).toContain('"photos"');
-  });
-
-  it("사진이 없으면 사진 목록을 (없음)으로 둔다", () => {
-    expect(buildPrompt(base)).toContain("[참여 사진 — 번호·설명]\n(없음)");
+describe("PHOTO-2 사진은 AI에 보내지 않음", () => {
+  it("사진 번호·설명 목록과 사진 배치 규칙·출력 키를 넣지 않는다", () => {
+    const p = buildPrompt(base);
+    expect(p).not.toContain("[참여 사진");
+    expect(p).not.toContain("[사진 ");
+    expect(p).not.toContain('"photos"');
+    expect(p).not.toContain("- photos:");
   });
 });
 
@@ -103,19 +100,19 @@ describe("FUNC-8 보고서 HTML", () => {
     expect(html).not.toContain("붙임");
   });
 
-  it("AI가 고른 자리 옆에 사진 자리를 두고, 참여 사진은 마지막 번호 항목·붙임은 번호 없이 맨 끝에 둔다", () => {
+  it("본문 섹션에는 사진 자리를 두지 않고, 참여 사진은 마지막 번호 항목·붙임은 번호 없이 맨 끝에 둔다", () => {
     const html = renderReportHtml(
       normalizeReport({
         title: "t",
         schedule: [["09:30", "온보딩", "참석"]],
         education: [{ title: "3-1. 강연", items: [{ t: "시장", sub: [] }] }, { title: "3-2. 워크숍", items: [{ t: "피치", sub: [] }] }],
         attachments: ["강연 자료"],
-        photos: [{ no: 1, place: "edu:2" }, { no: 2, place: "schedule" }, { no: 3, place: "edu:2" }, { no: 4, place: "edu:9" }, { no: 9, place: "schedule" }],
+        // 예전 응답 형식의 사진 배치가 와도 무시한다
+        photos: [{ no: 1, place: "edu:2" }, { no: 2, place: "schedule" }],
       }),
-      ["shared:a", "shared:b", "company:c", "shared:d"],
     );
-    expect(html).toContain('</table><div class="photos" data-photos="shared:b"></div><h2>3. 세부 교육 내용</h2>');
-    expect(html).toContain('<h3>3-2. 워크숍</h3><ul><li>피치</li></ul><div class="photos" data-photos="shared:a company:c"></div>');
+    expect(html.match(/class="photos"/g)).toHaveLength(1);
+    expect(html).not.toContain("data-photos");
     expect(html).toMatch(/<h2>4\. 참여 사진<\/h2><div class="photos"><\/div><h2>붙임<\/h2><ul><li>강연 자료<\/li><\/ul>$/);
   });
 
@@ -137,16 +134,14 @@ describe("생성 중 미리보기 부분 렌더", () => {
     insights: [{ t: "현지 수요", sub: ["근거"] }],
     plans: ["후속 미팅"],
     attachments: ["강연 자료"],
-    photos: [{ no: 1, place: "schedule" }, { no: 2, place: "edu:1" }],
   };
   const keys = Object.keys(full);
-  const photoKeys = ["shared:a", "shared:b"];
   // 최종 본문에서 사진 자리와 번호 붙은 참여 사진 제목을 뺀 것
   const withoutPhotos = (html: string) => html.replace(/<div class="photos"[^>]*><\/div>/g, "").replace(/<h2>\d+\. 참여 사진<\/h2>/, "");
 
   it("모든 키가 끝나면 사진 자리와 참여 사진 섹션만 뺀 최종 본문과 같다", () => {
     const html = renderPartialReportHtml(full, keys);
-    expect(html).toBe(withoutPhotos(renderReportHtml(normalizeReport(full), photoKeys)));
+    expect(html).toBe(withoutPhotos(renderReportHtml(normalizeReport(full))));
     expect(html).not.toContain("photos");
     expect(html).toMatch(/<h2>붙임<\/h2><ul><li>강연 자료<\/li><\/ul>$/);
   });

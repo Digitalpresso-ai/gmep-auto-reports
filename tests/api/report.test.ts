@@ -249,27 +249,26 @@ describe("AUTH-8 다른 회사 보고서", () => {
   });
 });
 
-describe("PHOTO-2 사진 배치", () => {
-  it("고른 사진의 설명을 선택 순서대로 프롬프트에 넣고, AI가 고른 섹션 옆에 사진 자리를 만든다", async () => {
+describe("PHOTO-2 사진은 AI에 보내지 않음", () => {
+  it("고른 사진의 번호·설명을 프롬프트에 넣지 않고, 본문 섹션에 사진 자리 없이 참여 사진 자리 하나만 둔다", async () => {
     const d = "2026-11-05";
     const cId = await companyWithPassword(t.sql, "주식회사 긱토", "c-password");
     const c = { cookie: await loginCookie(cId, "c-password") };
     await t.sql`insert into shared_days (report_date) values (${d})`;
     const [p1] = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height, description)
       values (${d}, 'photo', 'shared/2026-11-05/p1.jpg', 'p1.jpg', 1100, 825, '[강연] 발표 장면') returning id`;
-    const [p2] = await t.sql<{ id: string }[]>`insert into shared_files (report_date, kind, storage_path, filename, width, height)
-      values (${d}, 'photo', 'shared/2026-11-05/p2.jpg', 'p2.jpg', 1100, 825) returning id`;
-    const selectedPhotos = [{ source: "shared", id: p2.id }, { source: "shared", id: p1.id }];
+    const selectedPhotos = [{ source: "shared", id: p1.id }];
     await (await import("@/app/api/days/[date]/draft/route")).PUT(request("PUT", "/x", { cookie: c.cookie, body: { selectedPhotos } }), params({ date: d }));
     callModel.mockResolvedValueOnce(
-      reply(JSON.stringify({ title: "t", education: [{ title: "3-1. 강연", items: [{ t: "시장", sub: [] }], table: null }], photos: [{ no: 2, place: "edu:1" }, { no: 1, place: "photos" }] })),
+      reply(JSON.stringify({ title: "t", education: [{ title: "3-1. 강연", items: [{ t: "시장", sub: [] }], table: null }], photos: [{ no: 1, place: "edu:1" }] })),
     );
     const body = await (await generate(c.cookie, {}, d)).json();
     const req = callModel.mock.calls[0][0];
-    expect(req.prompt).toContain("[사진 1] (설명 없음)\n[사진 2] [강연] 발표 장면");
+    expect(req.prompt).not.toContain("[사진 1]");
+    expect(req.prompt).not.toContain("발표 장면");
     expect(req.images).toHaveLength(0);
-    expect(req.jsonSchema).toBeDefined();
-    expect(body.report.bodyHtml).toContain(`<ul><li>시장</li></ul><div class="photos" data-photos="shared:${p1.id}"></div>`);
+    expect(body.report.bodyHtml).not.toContain("data-photos");
+    expect(body.report.bodyHtml.match(/class="photos"/g)).toHaveLength(1);
   });
 });
 
@@ -314,7 +313,6 @@ describe("FUNC-10 AI 수정", () => {
     achievements: [{ t: "현지 거점 확보", sub: ["코워킹 이용"] }],
     insights: [{ t: "현지 수요 확인", sub: ["근거: 강연"] }],
     plans: ["11. 7.(토) 후속 미팅 준비"],
-    photos: [{ no: 1, place: "photos" }, { no: 2, place: "schedule" }],
   });
   // 회사가 직접 고친 뒤 첫 수정 직전의 본문과, 그 수정이 바꿀 시사점 목록 블록
   let before = "";
@@ -372,7 +370,6 @@ describe("FUNC-10 AI 수정", () => {
         educationMaterials: [],
         notes: "",
         hasScheduleImages: false,
-        photos: [{ description: "[투어] 거점" }, { description: "[강연] 발표" }],
       },
       GMEP_DAILY,
     );
@@ -382,8 +379,8 @@ describe("FUNC-10 AI 수정", () => {
     expect(req.followUp).toContain("[AI 수정]");
     expect(req.followUp).toContain("[b1] <h1>직접 고친 제목</h1>");
     expect(req.followUp).toContain(`[${target}] <ul><li><strong>현지 수요 확인</strong>`);
-    // 사진 자리는 사진 키 대신 프롬프트의 사진 번호로 보여 준다
-    expect(req.followUp).toContain("<p>[사진 2]</p>");
+    // 사진 자리는 사진 키 없이 표시만 한다
+    expect(req.followUp).toContain("<p>(참여 사진 자리)</p>");
     expect(req.followUp).not.toContain("shared:");
     expect(req.followUp).toContain("[지난 수정 요청 — 오래된 순, 모두 현재 문서에 반영됨]\n(없음)");
     expect(req.followUp).toContain("[이번 수정 요청]\n시사점을 더 구체적으로");
@@ -691,7 +688,6 @@ describe("생성 중 미리보기 스트림(NDJSON)", () => {
     insights: [{ t: "현지 수요 확인", sub: ["근거: 강연"] }],
     plans: ["후속 미팅 준비"],
     attachments: ["강연 자료"],
-    photos: [],
   });
   type Line = { type: string; [k: string]: unknown };
   const generateStream = async (cookie: string, body: unknown = {}, dd = d) => {

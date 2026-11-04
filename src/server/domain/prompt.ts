@@ -1,4 +1,4 @@
-// 프로토타입 buildPrompt()·SCHEMA 문구를 옮기고, 실제 11/2 자료로 돌린 평가(scripts/eval)에서 나온 감점을 [추가 규칙]으로 보탰다(AI-4, PHOTO-2).
+// 프로토타입 buildPrompt()·SCHEMA 문구를 옮기고, 실제 11/2 자료로 돌린 평가(scripts/eval)에서 나온 감점을 [추가 규칙]으로 보탰다(AI-4).
 // 문구를 바꾸면 보고서 품질이 달라지므로 요구 변경으로 다루고, 바꾼 뒤에는 평가 라운드를 다시 돌린다.
 
 export const EDU_LIMIT = 45_000;
@@ -13,8 +13,7 @@ export const SCHEMA = `{
   "special": [{"t":"별도 성과·미팅 제목","sub":["세부"]}],
   "insights": [{"t":"시사점 제목","sub":["세부"]}],
   "plans": ["향후 계획 한 줄"],
-  "attachments": ["첨부 자료명"],
-  "photos": [{"no":1,"place":"edu:1"}]
+  "attachments": ["첨부 자료명"]
 }`;
 
 export type Material = { filename: string; text: string };
@@ -30,8 +29,6 @@ export type PromptInput = {
   educationMaterials: Material[];
   notes: string;
   hasScheduleImages: boolean;
-  /** 회사가 고른 순서대로. 설명은 관리자가 공통 사진을 올릴 때 AI로 한 번 만든 것이고 회사가 추가한 사진은 비어 있다. */
-  photos: { description: string }[];
   extra?: string;
 };
 
@@ -41,7 +38,6 @@ export function buildPrompt(i: PromptInput): string {
   if (edu.length > EDU_LIMIT) edu = edu.slice(0, EDU_LIMIT) + "\n…(이하 생략)";
   const eduNames = i.educationMaterials.map((d) => d.filename);
   const proposal = i.proposalText.slice(0, PROPOSAL_LIMIT);
-  const photos = i.photos.map((p, n) => `[사진 ${n + 1}] ${p.description.trim() || "(설명 없음)"}`).join("\n");
   return `당신은 한국 스타트업 대표의 정부지원사업(2026 글로벌 액셀러레이팅 지원사업, GMEP) 해외 현지 프로그램 '일일 출장 결과보고서'를 작성합니다. 이 보고서는 사업비(여비) 집행 증빙으로 전담기관에 제출됩니다.
 
 [작성 규칙]
@@ -66,7 +62,6 @@ export function buildPrompt(i: PromptInput): string {
 - education 항목은 세션당 3~6개, 각 항목의 sub는 2~4개. 회사의 출장 목적(기안문)과 관련 깊은 슬라이드를 우선 반영.
 - insights 각 항목은 t에 결론, sub에 "근거: 교육 내용" → "적용: 회사 제품·고객·영업에 연결" 순서. 기안문의 출장 목적 분야를 빠짐없이 다룰 것.
 - plans는 담당자(출장자 이름)와 시점(날짜 또는 "11. 3.(화)까지" 등)을 포함.
-- photos: [참여 사진] 목록의 각 사진을 사진 설명에 가장 맞는 자리에 배치. place 값은 "schedule"(일정 표 아래: 장소·투어·네트워킹·단체 사진), "edu:N"(education 배열의 N번째 세션: 그 세션의 강연·슬라이드·워크숍 장면, N은 1부터), "photos"(맞는 자리가 없거나 설명 없음). 모든 사진 번호를 한 번씩 포함. 사진 설명 문구는 보고서 본문에 쓰지 말 것(참여 사진은 설명 없이 사진만).
 
 [회사 정보]
 - 회사명: ${i.companyName.trim() || "(미입력)"}
@@ -86,23 +81,12 @@ ${edu || "(없음)"}
 
 [특이사항 — 별도 성과·미팅 등]
 ${i.notes.trim() || "(없음)"}
-
-[참여 사진 — 번호·설명]
-${photos || "(없음)"}
 ${i.extra || ""}
 [출력] 아래 JSON 하나만 출력 (설명·코드블록 없이). 키 이름은 그대로 유지:
 ${SCHEMA}`;
 }
 
 export const REVISION_REQUEST_LIMIT = 1_000;
-
-/** 보고서 HTML의 사진 자리를 프롬프트의 사진 번호로 바꾼다. photoKeys[i]가 [사진 i+1]이다. 번호가 없는 사진과 빈 자리는 뺀다. */
-export function htmlWithPhotoNumbers(html: string, photoKeys: string[]): string {
-  return html.replace(/<div class="photos"(?: data-photos="([^"]*)")?><\/div>/g, (_, keys: string | undefined) => {
-    const nos = (keys ?? "").split(" ").map((k) => photoKeys.indexOf(k) + 1).filter((n) => n > 0);
-    return nos.length ? `<p>${nos.map((n) => `[사진 ${n}]`).join(" ")}</p>` : "";
-  });
-}
 
 /**
  * AI 수정 요청(FUNC-10). 생성 프롬프트 뒤에 붙여 생성 프롬프트를 캐시에서 읽게 하고(AI-13), 출력 형식도 생성과 같은 JSON을 쓴다.
@@ -127,6 +111,5 @@ ${i.request}
 - 이번 수정 요청이 가리키는 부분만 바꾸고, 나머지 문장·표·항목 순서는 현재 보고서 그대로 옮길 것. 회사가 직접 고친 문장은 자료와 달라도 바꾸지 말 것.
 - 지난 수정 요청으로 바뀐 내용을 되돌리지 말 것. 이번 요청의 "아까", "방금", "다시" 같은 말은 지난 수정 요청 목록에서 찾아 해석.
 - 위 [작성 규칙]·[추가 규칙]은 계속 지킬 것. 이번 요청이 자료에 없는 사실을 넣으라고 하면 요청한 문구만 넣고 그 밖의 내용은 지어내지 말 것.
-- photos: 현재 보고서에서 [사진 N] 표시가 있는 자리를 유지(일정 표 아래면 "schedule", N번째 교육 세션 뒤면 "edu:N", 표시가 없는 사진은 "photos"). 이번 요청이 사진 자리를 바꾸라고 할 때만 바꿀 것.
 `;
 }

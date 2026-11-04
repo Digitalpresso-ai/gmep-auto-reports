@@ -7,7 +7,6 @@ import { buildAgentPrompt, buildAgentRevision } from "./domain/agent";
 import { numberedForModel, parseBlocks, type BlockDoc } from "./domain/blocks";
 import { buildPrompt, type Material, type PromptInput } from "./domain/prompt";
 import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderPartialReportHtml, renderReportHtml, type Report } from "./domain/report";
-import { photoKey } from "@/lib/photo-layout";
 import { canGenerate, canRevise, usageView, type UsageView } from "./domain/usage";
 import { GMEP_DAILY } from "./domain/template";
 import { DEADLINE_MS, runReportAgent, type AgentResult, type TurnUsage } from "./report-agent";
@@ -64,20 +63,9 @@ async function reserve(companyId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-// 회사가 고른 순서대로 사진 키와 설명을 돌려준다. 설명은 공통 사진에만 있다(PHOTO-1).
-async function selectedPhotos(date: string, refs: { source: string; id: string }[]): Promise<{ key: string; description: string }[]> {
-  const sharedIds = refs.filter((r) => r.source === "shared").map((r) => r.id);
-  const rows = sharedIds.length
-    ? await db()<{ id: string; description: string | null }[]>`
-        select id, description from shared_files where report_date = ${date} and kind = 'photo' and id = any(${sharedIds}::uuid[])`
-    : [];
-  const desc = new Map(rows.map((r) => [r.id, r.description ?? ""]));
-  return refs.map((r) => ({ key: photoKey(r), description: r.source === "shared" ? (desc.get(r.id) ?? "") : "" }));
-}
+type GenerationInput = { input: PromptInput; images: ModelRequest["images"] };
 
-type GenerationInput = { input: PromptInput; images: ModelRequest["images"]; photoKeys: string[] };
-
-/** 생성과 AI 수정이 같이 쓰는 입력: 회사 정보·자료·일정 이미지·고른 사진 설명. */
+/** 생성과 AI 수정이 같이 쓰는 입력: 회사 정보·자료·일정 이미지. 고른 사진은 AI가 다루지 않는다(PHOTO-2). */
 async function generationInput(companyId: string, date: string): Promise<GenerationInput> {
   const sql = db();
   const [c] = await sql<{ name: string; traveler: string; business_intro: string; proposal_text: string }[]>`
@@ -88,7 +76,6 @@ async function generationInput(companyId: string, date: string): Promise<Generat
   const images = await sql<{ storage_path: string }[]>`
     select storage_path from shared_files where report_date = ${date} and kind = 'schedule_image' order by created_at, id limit ${MAX_SCHEDULE_IMAGES}`;
   const draft = await getDraft(companyId, date);
-  const photos = await selectedPhotos(date, draft?.selected_photos ?? []);
   const pick = (kind: string): Material[] => materials.filter((m) => m.kind === kind).map((m) => ({ filename: m.filename, text: m.text_content }));
   const input: PromptInput = {
     companyName: c.name,
@@ -101,18 +88,16 @@ async function generationInput(companyId: string, date: string): Promise<Generat
     educationMaterials: pick("education"),
     notes: draft?.notes ?? "",
     hasScheduleImages: images.length > 0,
-    photos,
   };
   // 참여 사진은 보내지 않는다(AI-6). 일정 이미지만 보낸다(FUNC-4).
   const bytes = await Promise.all(images.map((i) => getObject(i.storage_path)));
   return {
     input,
-    photoKeys: photos.map((p) => p.key),
     images: bytes.map((b, idx) => ({ mediaType: mediaTypeOf(images[idx].storage_path), base64: Buffer.from(b).toString("base64") })),
   };
 }
 
-async function promptRequest(companyId: string, date: string): Promise<ModelRequest & { photoKeys: string[] }> {
+async function promptRequest(companyId: string, date: string): Promise<ModelRequest> {
   const g = await generationInput(companyId, date);
   return {
     model: await aiModel(),
@@ -121,7 +106,6 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
     // prefix가 달라 이 캐시를 읽지 않는다. 1시간 TTL은 수정이 이 캐시를 읽던 때 정한 값이다.
     cacheTtl: "1h",
     jsonSchema: REPORT_JSON_SCHEMA,
-    photoKeys: g.photoKeys,
     images: g.images,
   };
 }
@@ -234,7 +218,7 @@ async function runGeneration(companyId: string, date: string, onEvent?: (e: Gene
     const req = await promptRequest(companyId, date);
     const report = await callForReport(companyId, "generate", req, onEvent);
     if (typeof report === "string") return { kind: report };
-    const bodyHtml = renderReportHtml(report, req.photoKeys);
+    const bodyHtml = renderReportHtml(report);
     const draft = await getDraft(companyId, date);
     const [row] = await sql.begin(async (tx) => {
       const rows = await tx<{ id: string; updated_at: Date }[]>`
@@ -332,10 +316,9 @@ export async function reviseReport(companyId: string, date: string, request: str
         model,
         // 생성 입력과 양식만으로 만든 캐시 prefix. 수정 요청·현재 문서는 followUp(캐시 밖)에만 둔다.
         prompt: buildAgentPrompt(g.input, GMEP_DAILY),
-        followUp: buildAgentRevision({ numberedDoc: numberedForModel(doc, g.photoKeys), previousRequests: previous.map((x) => x.request), request }),
+        followUp: buildAgentRevision({ numberedDoc: numberedForModel(doc), previousRequests: previous.map((x) => x.request), request }),
         images: g.images,
         template: GMEP_DAILY,
-        photoKeys: g.photoKeys,
         doc,
         limits: { deadlineMs },
         onEvent: () => {},

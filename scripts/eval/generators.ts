@@ -1,7 +1,7 @@
 // 평가가 바꿔 끼우는 생성기. 입력(자료·사진 키)은 같고 "프롬프트 → 모델 호출 → 보고서 HTML"만 방식마다 다르다.
 // EVAL_MODE로 고른다. 지금 운영 방식은 "json"이고, 블록 편집 tool 방식은 "blocks"로 추가할 자리다.
 import { callModel, type ModelRequest } from "@/server/ai";
-import { buildPrompt, buildRevisionFollowUp, htmlWithPhotoNumbers, type PromptInput } from "@/server/domain/prompt";
+import { buildPrompt, buildRevisionFollowUp, type PromptInput } from "@/server/domain/prompt";
 import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, type Report } from "@/server/domain/report";
 import { buildAgentPrompt, buildAgentRevision } from "@/server/domain/agent";
 import { numberedForModel, parseBlocks, type BlockDoc } from "@/server/domain/blocks";
@@ -15,7 +15,7 @@ export type GenerateInput = {
   model: string;
   promptInput: PromptInput;
   scheduleImages: ModelRequest["images"];
-  /** photoKeys[i]가 프롬프트의 [사진 i+1]이다. */
+  /** 회사가 고른 사진 키(선택 순서). AI에는 보내지 않고 Word에 넣을 때만 쓴다. */
   photoKeys: string[];
 };
 export type ReviseInput = GenerateInput & { currentHtml: string; previousRequests: string[]; request: string };
@@ -47,7 +47,7 @@ export type Generator = { mode: Mode; generate: (i: GenerateInput) => Promise<Ge
 const ZERO: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
 // src/server/generate.ts callForReport와 같은 흐름: 1시간 캐시, 구조화 출력, 파싱 실패 시 1회 재시도(AI-5).
-async function callJson(req: ModelRequest, photoKeys: string[]): Promise<GenOutput> {
+async function callJson(req: ModelRequest): Promise<GenOutput> {
   const started = Date.now();
   const detail: GenMeta["attemptsDetail"] = [];
   let last: Awaited<ReturnType<typeof callModel>> | undefined;
@@ -76,7 +76,7 @@ async function callJson(req: ModelRequest, photoKeys: string[]): Promise<GenOutp
   };
   if (report) files["report.json"] = JSON.stringify(report, null, 1);
   return {
-    html: report ? renderReportHtml(report, photoKeys) : "",
+    html: report ? renderReportHtml(report) : "",
     report,
     files,
     meta: {
@@ -101,16 +101,13 @@ function baseRequest(i: GenerateInput): ModelRequest {
 
 export const jsonGenerator: Generator = {
   mode: "json",
-  generate: (i) => callJson(baseRequest(i), i.photoKeys),
+  generate: (i) => callJson(baseRequest(i)),
   // src/server/generate.ts reviseReport와 같다: 생성 프롬프트(캐시 대상) 뒤에 수정 지시를 붙인다(FUNC-10, AI-13)
   revise: (i) =>
-    callJson(
-      {
-        ...baseRequest(i),
-        followUp: buildRevisionFollowUp({ currentHtml: htmlWithPhotoNumbers(i.currentHtml, i.photoKeys), previousRequests: i.previousRequests, request: i.request }),
-      },
-      i.photoKeys,
-    ),
+    callJson({
+      ...baseRequest(i),
+      followUp: buildRevisionFollowUp({ currentHtml: i.currentHtml, previousRequests: i.previousRequests, request: i.request }),
+    }),
 };
 
 // src/server/report-agent.ts의 ReAct 루프를 그대로 돌린다. 이벤트마다 시작 기준 ms를 남겨 화면에 블록이 보이는 시점을 잰다.
@@ -127,7 +124,6 @@ async function callBlocks(i: GenerateInput, doc: BlockDoc, followUp?: string): P
     followUp,
     images: i.scheduleImages,
     template: GMEP_DAILY,
-    photoKeys: i.photoKeys,
     doc,
     onEvent: (e) => events.push({ ...e, ms: Date.now() - started }),
   });
@@ -171,7 +167,7 @@ export const blocksGenerator: Generator = {
   generate: (i) => callBlocks(i, { blocks: [] }),
   revise: (i) => {
     const doc = parseBlocks(i.currentHtml);
-    return callBlocks(i, doc, buildAgentRevision({ numberedDoc: numberedForModel(doc, i.photoKeys), previousRequests: i.previousRequests, request: i.request }));
+    return callBlocks(i, doc, buildAgentRevision({ numberedDoc: numberedForModel(doc), previousRequests: i.previousRequests, request: i.request }));
   },
 };
 

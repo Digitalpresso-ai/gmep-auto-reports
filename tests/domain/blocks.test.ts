@@ -5,12 +5,10 @@ import { normalizeReport, renderReportHtml } from "@/server/domain/report";
 import { cleanReportHtml } from "@/server/sanitize";
 
 const k1 = "shared:0b6f3c1e-1d2a-4c3b-9e8f-112233445566";
-const k2 = "company:1c7f4d2f-2e3b-4d4c-8f9a-223344556677";
 const k3 = "shared:2d8a5e3a-3f4c-4e5d-9a0b-334455667788";
-const keys = [k1, k2, k3];
 
 function apply(doc: BlockDoc, op: BlockOp): BlockDoc {
-  const r = applyOp(doc, op, keys);
+  const r = applyOp(doc, op);
   if (!r.ok) throw new Error(r.error);
   return r.doc;
 }
@@ -40,9 +38,8 @@ describe("블록 문서: HTML ↔ 블록", () => {
       insights: [{ t: "현지화", sub: ["근거", "적용"] }],
       plans: ["11. 3.(화) 대비"],
       attachments: ["교육자료"],
-      photos: [{ no: 1, place: "schedule" }, { no: 2, place: "edu:1" }],
     });
-    const html = renderReportHtml(report, keys);
+    const html = renderReportHtml(report);
     const doc = parseBlocks(html);
     expect(renderDoc(doc)).toBe(html);
     expect(headingsOf(doc).filter((h) => h.level === 2).map((h) => h.text)).toEqual([
@@ -63,7 +60,7 @@ describe("블록 문서: tool 연산", () => {
 
   it("빈 문서에 블록을 차례로 추가하면 끝에 붙고 id가 이어진다", () => {
     let doc = parseBlocks("");
-    const r1 = applyOp(doc, { name: "add_heading", input: { level: 1, text: "제목 <A&B>", after: null } }, keys);
+    const r1 = applyOp(doc, { name: "add_heading", input: { level: 1, text: "제목 <A&B>", after: null } });
     expect(r1).toMatchObject({ ok: true, id: "b1" });
     doc = apply(doc, { name: "add_heading", input: { level: 1, text: "제목 <A&B>", after: null } });
     doc = apply(doc, { name: "add_paragraph", input: { text: '따옴표 "x"', after: null } });
@@ -83,11 +80,8 @@ describe("블록 문서: tool 연산", () => {
     );
   });
 
-  it("사진 번호를 사진 키로 바꾸고 없는 번호와 중복은 버린다", () => {
-    const doc = apply(parseBlocks(""), { name: "add_photos", input: { photos: [2, 9, 1, 2, 0], after: null } });
-    expect(renderDoc(doc)).toBe(`<div class="photos" data-photos="${k2} ${k1}"></div>`);
-    const r = applyOp(parseBlocks(""), { name: "add_photos", input: { photos: [7], after: null } }, keys);
-    expect(r.ok).toBe(false);
+  it("사진 자리 도구는 없다(사진은 참여 사진에 자동으로 들어간다)", () => {
+    expect(applyOp(parseBlocks(""), { name: "add_photos", input: { photos: [1], after: null } }).ok).toBe(false);
   });
 
   it("after로 위치를 정하고, start는 맨 앞이다", () => {
@@ -123,11 +117,11 @@ describe("블록 문서: tool 연산", () => {
       { name: "add_paragraph", input: null },
     ];
     for (const op of bad) {
-      const r = applyOp(doc, op, keys);
+      const r = applyOp(doc, op);
       expect(r.ok, op.name).toBe(false);
       if (!r.ok) expect(r.error.length).toBeGreaterThan(0);
     }
-    expect(applyOp(doc, bad[0], keys)).toEqual({ ok: false, error: expect.stringContaining("b99") });
+    expect(applyOp(doc, bad[0])).toEqual({ ok: false, error: expect.stringContaining("b99") });
   });
 
   it("도구로 만든 HTML은 cleanReportHtml을 통과해도 바뀌지 않는다", () => {
@@ -140,17 +134,16 @@ describe("블록 문서: tool 연산", () => {
     doc = apply(doc, { name: "add_table", input: { style: "grid", head: [t], rows: [[t]], after: null } });
     doc = apply(doc, { name: "add_table", input: { style: "grid", head: [], rows: [[t, t]], after: null } });
     doc = apply(doc, { name: "add_table", input: { style: "kv", head: [], rows: [[t, t]], after: null } });
-    doc = apply(doc, { name: "add_photos", input: { photos: [1, 3], after: null } });
     const html = renderDoc(doc);
     expect(cleanReportHtml(html)).toBe(html);
   });
 });
 
 describe("블록 문서: 수정 프롬프트용 번호", () => {
-  it("블록마다 [bN]을 붙이고 사진 자리는 [사진 N]으로 바꾼다", () => {
+  it("블록마다 [bN]을 붙이고, 사진 자리는 사진 키 없이 표시만 한다", () => {
     const doc = parseBlocks(`<h2>2. 일정</h2>\n<div class="photos" data-photos="${k3} ${k1}"></div><h2>7. 참여 사진</h2><div class="photos"></div>`);
-    expect(numberedForModel(doc, keys)).toBe(
-      ["[b1] <h2>2. 일정</h2>", "[b2] <p>[사진 3] [사진 1]</p>", "[b3] <h2>7. 참여 사진</h2>", "[b4] <p>(나머지 사진 자리)</p>"].join("\n"),
+    expect(numberedForModel(doc)).toBe(
+      ["[b1] <h2>2. 일정</h2>", "[b2] <p>(빈 사진 자리)</p>", "[b3] <h2>7. 참여 사진</h2>", "[b4] <p>(참여 사진 자리)</p>"].join("\n"),
     );
   });
 });
@@ -161,8 +154,8 @@ describe("블록 도구 정의", () => {
   it("추가·교체·삭제 도구를 모두 갖는다", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
-        "add_heading", "add_paragraph", "add_list", "add_table", "add_photos",
-        "replace_heading", "replace_paragraph", "replace_list", "replace_table", "replace_photos",
+        "add_heading", "add_paragraph", "add_list", "add_table",
+        "replace_heading", "replace_paragraph", "replace_list", "replace_table",
         "delete_block",
       ].sort(),
     );

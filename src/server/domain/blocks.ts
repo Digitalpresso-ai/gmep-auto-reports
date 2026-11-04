@@ -133,19 +133,12 @@ function buildTable(f: Fields): Built {
   return { html: tableHtml(f.style, f.head, f.rows as string[][]) };
 }
 
-function buildPhotos(f: Fields, photoKeys: string[]): Built {
-  if (!Array.isArray(f.photos) || !f.photos.every((n) => Number.isInteger(n))) return { error: "photos는 사진 번호(정수) 배열이어야 합니다." };
-  const keys = [...new Set((f.photos as number[]).map((n) => photoKeys[n - 1]).filter((k): k is string => Boolean(k)))];
-  if (!keys.length) return { error: photoKeys.length ? `있는 사진 번호가 없습니다. 쓸 수 있는 번호는 1~${photoKeys.length}입니다.` : "이 보고서에는 사진이 없습니다." };
-  return { html: photosHtml(keys) };
-}
-
-const BUILDERS: Record<string, (f: Fields, photoKeys: string[]) => Built> = {
+// 사진 자리 도구는 두지 않는다. 고른 사진은 모두 참여 사진 자리에 들어가고, 그 자리는 서버가 넣는다(withRestPhotos).
+const BUILDERS: Record<string, (f: Fields) => Built> = {
   heading: buildHeading,
   paragraph: buildParagraph,
   list: buildList,
   table: buildTable,
-  photos: buildPhotos,
 };
 
 // ---------- 연산 ----------
@@ -157,7 +150,7 @@ function nextId(doc: BlockDoc): string {
 
 const noBlock = (id: unknown) => ({ ok: false as const, error: `블록 ${String(id)}이(가) 문서에 없습니다. 현재 블록 id만 쓸 수 있습니다.` });
 
-export function applyOp(doc: BlockDoc, op: BlockOp, photoKeys: string[]): ApplyResult {
+export function applyOp(doc: BlockDoc, op: BlockOp): ApplyResult {
   const f = op.input;
   if (!f || typeof f !== "object" || Array.isArray(f)) return { ok: false, error: "도구 인자는 객체여야 합니다." };
   const input = f as Fields;
@@ -170,7 +163,7 @@ export function applyOp(doc: BlockDoc, op: BlockOp, photoKeys: string[]): ApplyR
   }
   if (!m || !BUILDERS[m[2]]) return { ok: false, error: `모르는 도구입니다: ${op.name}` };
 
-  const built = BUILDERS[m[2]](input, photoKeys);
+  const built = BUILDERS[m[2]](input);
   if ("error" in built) return { ok: false, error: built.error };
 
   if (m[1] === "replace") {
@@ -196,18 +189,16 @@ export function applyOp(doc: BlockDoc, op: BlockOp, photoKeys: string[]): ApplyR
 // ---------- 수정 프롬프트 ----------
 
 /**
- * 수정 요청 때 현재 문서를 "[b3] <h2>…</h2>" 줄로 보낸다. 사진 자리는 [사진 N](photoKeys[N-1])으로 바꾸고,
- * 키 없는 자리는 나머지 사진 자리로, 지금 사진 목록에 없는 키만 있는 자리는 빈 자리로 적는다.
+ * 수정 요청 때 현재 문서를 "[b3] <h2>…</h2>" 줄로 보낸다. 사진 자리는 사진 키 대신 표시만 한다.
+ * 키 있는 자리는 예전 생성 결과에 남은 섹션별 자리로, 지금은 사진이 들어가지 않는다.
  */
-export function numberedForModel(doc: BlockDoc, photoKeys: string[]): string {
+export function numberedForModel(doc: BlockDoc): string {
   return doc.blocks
     .map((b) => {
       const el = firstElement(b.html);
       let html = b.html.trim();
       if (el && el.type === "tag" && isPhotos(el)) {
-        const attr = el.attribs["data-photos"];
-        const nos = (attr ?? "").split(/\s+/).map((k) => photoKeys.indexOf(k) + 1).filter((n) => n > 0);
-        html = attr == null ? "<p>(나머지 사진 자리)</p>" : nos.length ? `<p>${nos.map((n) => `[사진 ${n}]`).join(" ")}</p>` : "<p>(빈 사진 자리)</p>";
+        html = el.attribs["data-photos"] == null ? "<p>(참여 사진 자리)</p>" : "<p>(빈 사진 자리)</p>";
       }
       return `[${b.id}] ${html}`;
     })
@@ -235,10 +226,9 @@ const FIELDS = {
     head: { ...strList, description: "grid의 머리행. 없으면 빈 배열" },
     rows: { type: "array", items: strList },
   },
-  photos: { photos: { type: "array", items: { type: "integer" }, description: "[사진 N]의 번호 N 목록" } },
 } as const;
 
-const NAMES = { heading: "제목", paragraph: "문단", list: "목록", table: "표", photos: "사진 자리" } as const;
+const NAMES = { heading: "제목", paragraph: "문단", list: "목록", table: "표" } as const;
 const AFTER = { type: ["string", "null"], description: '이 블록 id 바로 뒤에 넣는다. "start"는 문서 맨 앞, null은 문서 끝' } as const;
 const ID = { type: "string", description: "대상 블록 id (예: b3)" } as const;
 

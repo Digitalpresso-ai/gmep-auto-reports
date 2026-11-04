@@ -16,7 +16,6 @@ const input = (over: Partial<PromptInput> = {}): PromptInput => ({
   educationMaterials: [{ filename: "market.pdf", text: "독일 B2B 구매 구조" }],
   notes: "",
   hasScheduleImages: false,
-  photos: [{ description: "세미나 강연 장면" }, { description: "" }],
   ...over,
 });
 
@@ -83,7 +82,7 @@ describe("buildAgentPrompt", () => {
 
   it("수정 요청·현재 문서는 prefix에 없고 수정 지시는 prefix 뒤에 붙는다", () => {
     const prompt = buildAgentPrompt(input(), GMEP_DAILY);
-    const doc = numberedForModel(parseBlocks("<h1>보고서</h1><h2>1. 기본 정보</h2>"), []);
+    const doc = numberedForModel(parseBlocks("<h1>보고서</h1><h2>1. 기본 정보</h2>"));
     const revision = buildAgentRevision({ numberedDoc: doc, previousRequests: ["성과를 줄여 줘"], request: "제목을 바꿔 줘" });
     expect(prompt).not.toContain("[b1]");
     expect(prompt).not.toContain("제목을 바꿔 줘");
@@ -113,7 +112,7 @@ describe("buildAgentPrompt", () => {
     const materials = legacy.slice(legacy.indexOf("[회사 정보]"), legacy.indexOf("[출력]"));
     expect(materials).toContain("…(이하 생략)");
     expect(buildAgentPrompt(i, GMEP_DAILY)).toContain(materials);
-    expect(buildAgentPrompt(i, GMEP_DAILY)).toContain("[사진 2] (설명 없음)");
+    expect(buildAgentPrompt(i, GMEP_DAILY)).not.toContain("[사진");
   });
 
   it("작업 방식: 계획 → 섹션별 병렬 블록 호출 → 결과 보고 교체 → finish, 본문 텍스트 출력 금지", () => {
@@ -122,7 +121,7 @@ describe("buildAgentPrompt", () => {
     expect(order.every((n) => n > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(prompt).toContain("본문 텍스트");
-    expect(prompt).toContain("add_photos");
+    expect(prompt).not.toContain("add_photos");
     expect(prompt).toMatch(/참여 사진[^\n]*블록을 추가하지 않/);
   });
 
@@ -133,16 +132,14 @@ describe("buildAgentPrompt", () => {
     expect(at.every((n) => n > 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     for (const g of WEEKLY.sections.flatMap((s) => s.guidance)) expect(prompt).toContain(g);
-    // "참여 사진"은 자료 블록 표지([참여 사진 — 번호·설명])에도 있어 뺀다.
-    for (const s of GMEP_DAILY.sections) if (s.heading !== "참여 사진") expect(prompt).not.toContain(s.heading);
-    expect(prompt).not.toMatch(/참여 사진[^\n]*블록을 추가하지 않/);
+    for (const s of GMEP_DAILY.sections) expect(prompt).not.toContain(s.heading);
     expect(prompt).toMatch(/참고 자료[^\n]*번호 없음/);
     expect(prompt).toMatch(/이번 주 요약[^\n]*필수/);
   });
 });
 
 describe("buildAgentRevision", () => {
-  const doc = numberedForModel(parseBlocks(`<h1>보고서</h1><h2>1. 기본 정보</h2><ul><li>확인</li></ul>${photosHtml(["shared:a"])}`), ["shared:a"]);
+  const doc = numberedForModel(parseBlocks(`<h1>보고서</h1><h2>1. 기본 정보</h2><ul><li>확인</li></ul>${photosHtml([])}`));
 
   it("현재 문서 번호 목록, 지난 요청(번호), 이번 요청을 그대로 담는다", () => {
     const text = buildAgentRevision({ numberedDoc: doc, previousRequests: ["성과를 줄여 줘", "사진을 위로"], request: "아까 줄인 성과를 하나 더 줄여 줘" });

@@ -19,7 +19,6 @@ const fullReport = () =>
       insights: [{ t: "시사점", sub: [] }],
       plans: ["계획"],
       attachments: ["자료"],
-      photos: [],
     }),
   );
 
@@ -70,6 +69,12 @@ const WEEKLY: ReportTemplate = {
   ],
 };
 
+describe("PHOTO-2 양식의 사진 안내", () => {
+  it("참여 사진 밖의 섹션 지침은 사진 자리를 안내하지 않는다", () => {
+    for (const sec of GMEP_DAILY.sections.filter((x) => x.heading !== "참여 사진")) expect(sec.guidance.join("\n"), sec.heading).not.toContain("사진");
+  });
+});
+
 describe("다른 양식에서도 같은 코드가 동작한다", () => {
   it("missingSections가 양식의 필수 섹션을 따른다", () => {
     const doc = parseBlocks("<h1>주간</h1><h2>1. 개요</h2><p>a</p><h2>기본 정보</h2>");
@@ -96,7 +101,7 @@ describe("withRestPhotos (기본 양식)", () => {
   it("모델이 사진 자리를 지웠으면 참여 사진 제목 바로 뒤에 다시 넣는다", () => {
     let doc = parseBlocks(fullReport());
     const box = doc.blocks.findIndex((b) => b.html === '<div class="photos"></div>');
-    const r = applyOp(doc, { name: "delete_block", input: { id: doc.blocks[box].id } }, []);
+    const r = applyOp(doc, { name: "delete_block", input: { id: doc.blocks[box].id } });
     if (!r.ok) throw new Error(r.error);
     doc = withRestPhotos(GMEP_DAILY, r.doc);
     expect(renderDoc(doc)).toBe(fullReport());

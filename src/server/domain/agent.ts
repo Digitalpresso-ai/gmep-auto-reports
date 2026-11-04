@@ -57,7 +57,6 @@ function materials(i: PromptInput): string {
   if (edu.length > EDU_LIMIT) edu = edu.slice(0, EDU_LIMIT) + "\n…(이하 생략)";
   const eduNames = i.educationMaterials.map((d) => d.filename);
   const proposal = i.proposalText.slice(0, PROPOSAL_LIMIT);
-  const photos = i.photos.map((p, n) => `[사진 ${n + 1}] ${p.description.trim() || "(설명 없음)"}`).join("\n");
   return `[회사 정보]
 - 회사명: ${i.companyName.trim() || "(미입력)"}
 - 출장자: ${i.traveler.trim() || "(기안문 참조)"}
@@ -76,9 +75,6 @@ ${edu || "(없음)"}
 
 [특이사항 — 별도 성과·미팅 등]
 ${i.notes.trim() || "(없음)"}
-
-[참여 사진 — 번호·설명]
-${photos || "(없음)"}
 ${i.extra || ""}
 `;
 }
@@ -114,15 +110,10 @@ export function buildAgentPrompt(i: PromptInput, t: ReportTemplate): string {
 ${templateSection(t)}
 
 [블록 쓰는 법]
-- 문서는 블록 목록이다. 블록 하나가 tool 호출 하나다: 제목은 add_heading(level 1 문서 제목, 2 섹션 제목, 3 섹션 안 소제목), 목록은 add_list, 표는 add_table, 짧은 문장은 add_paragraph, 사진 자리는 add_photos.
+- 문서는 블록 목록이다. 블록 하나가 tool 호출 하나다: 제목은 add_heading(level 1 문서 제목, 2 섹션 제목, 3 섹션 안 소제목), 목록은 add_list, 표는 add_table, 짧은 문장은 add_paragraph.
 - 목록 항목에 하위 항목(sub)이 있으면 상위 항목은 굵게 표시된다. 하위 항목이 없으면 sub는 빈 배열.
 - 표: kv는 왼쪽 열이 항목명인 2열 표(head는 빈 배열), grid는 head가 머리행인 표.
 - 새로 쓸 때 after는 null이다(문서 끝에 이어서 넣는다).
-
-[사진]
-- [참여 사진] 목록의 사진은 사진 설명에 가장 맞는 섹션의 내용 블록 바로 뒤에 add_photos로 둔다. 같은 자리의 사진은 한 번에 묶는다.
-- 각 사진 번호는 문서 전체에서 한 번만 쓴다. 사진 설명 문구는 본문에 쓰지 않는다.
-- ${rest ? `맞는 자리가 없거나 설명이 없는 사진은 넣지 않는다. 그런 사진은 서버가 "${rest}" 섹션에 넣는다.` : "맞는 자리가 없거나 설명이 없는 사진은 넣지 않는다."}
 
 ${materials(i)}
 [작업 방식 — tool 호출로만 작성]
@@ -165,7 +156,7 @@ ${i.request}
 - 지난 수정 요청으로 바뀐 내용을 되돌리지 말 것. 이번 요청의 "아까", "방금", "다시" 같은 말은 지난 수정 요청 목록에서 찾아 해석.
 - 위 [작성 규칙]과 섹션 지침은 계속 지킬 것. 이번 요청이 자료에 없는 사실을 넣으라고 하면 요청한 문구만 넣고 그 밖의 내용은 지어내지 말 것.
 - 번호 붙은 섹션을 넣거나 지우면 뒤 섹션 제목의 번호도 replace_heading으로 맞춘다.
-- [사진 N] 블록은 요청이 사진 자리를 바꾸라고 할 때만 replace_photos·delete_block으로 바꾼다. (나머지 사진 자리) 블록은 지우거나 바꾸지 않는다.
+- (참여 사진 자리)·(빈 사진 자리) 블록은 지우거나 바꾸지 않는다. 사진은 회사가 입력 화면에서 고른 순서대로 참여 사진 자리에 들어간다.
 - 본문 텍스트(설명 문장)는 출력하지 않는다.
 `;
 }

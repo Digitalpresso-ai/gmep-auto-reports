@@ -47,7 +47,6 @@ export const GMEP_DAILY: ReportTemplate = {
         "grid 표로 시간, 프로그램, 수행 내용 열을 둔다.",
         "일정 항목별 '수행 내용'은 일정·교육자료에서 확인되는 내용으로 구체적으로. 연기·취소된 세션이 자료에 보이면 \"연기\"로 표시.",
         "연기·취소 사유는 자료에 있을 때만 적는다.",
-        "장소·투어·네트워킹·단체 사진은 일정 표 아래 사진 자리에 둔다.",
       ],
     },
     {
@@ -59,7 +58,6 @@ export const GMEP_DAILY: ReportTemplate = {
         "교육자료가 있으면 세션별 핵심 내용을 3~6개 항목으로 요약(통계·사례 포함). 교육자료가 없으면 일정에서 알 수 있는 범위에서 간략히. 전문가 명단 등은 표로.",
         "각 항목의 하위 항목은 2~4개. 회사의 출장 목적(기안문)과 관련 깊은 슬라이드를 우선 반영.",
         "자료의 사실만 쓴다(회사 해석·\"당사 해당 사항\" 금지). 자료에 내용이 없는 세션은 \"참석\"·\"청취\"까지만.",
-        "그 세션의 강연·슬라이드·워크숍 장면 사진은 그 세션 뒤 사진 자리에 둔다.",
       ],
     },
     {
@@ -91,7 +89,7 @@ export const GMEP_DAILY: ReportTemplate = {
       heading: "참여 사진",
       required: false,
       numbered: true,
-      guidance: ["제목과 사진 자리는 자동으로 들어간다. 이 섹션에는 블록을 추가하지 않는다."],
+      guidance: ["제목과 사진 자리는 자동으로 들어가고, 고른 사진이 선택 순서대로 모두 들어간다. 이 섹션에는 블록을 추가하지 않는다."],
     },
     {
       heading: "붙임",
@@ -133,7 +131,7 @@ export function withRestPhotos(template: ReportTemplate, doc: BlockDoc): BlockDo
   const n = h2.filter((h) => indexOf(h.id) < at && /^\d+\./.test(h.text)).length + 1;
   const text = section?.numbered === false ? name : `${n}. ${name}`;
 
-  const r = applyOp(doc, { name: "add_heading", input: { level: 2, text, after: at === 0 ? "start" : doc.blocks[at - 1].id } }, []);
+  const r = applyOp(doc, { name: "add_heading", input: { level: 2, text, after: at === 0 ? "start" : doc.blocks[at - 1].id } });
   if (!r.ok) return doc;
   return insertBlock(r.doc, at + 1, photosHtml([])).doc;
 }

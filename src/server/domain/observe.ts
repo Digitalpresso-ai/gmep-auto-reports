@@ -82,32 +82,13 @@ export function planIssues(t: ReportTemplate, sections: { heading: string }[]): 
   ];
 }
 
-/** 사진 블록의 data-photos 키 목록. 키 없는 자리(나머지 사진 자리)와 사진 블록이 아닌 것은 null. */
-function photoKeysOf(html: string): string[] | null {
-  const el = parseDocument(html).children.find((n) => n.type === "tag") as Element | undefined;
-  if (!el || el.name !== "div" || !(el.attribs.class ?? "").split(/\s+/).includes("photos")) return null;
-  const attr = el.attribs["data-photos"];
-  return attr == null ? null : attr.split(/\s+/).filter(Boolean);
-}
-
 /**
  * changed를 주면 수정 검사다. 이번 실행에서 바뀐 블록만 규칙을 보고, 빠진 필수 섹션은 알리지 않는다.
  * 요청 밖 블록(회사가 직접 쓴 문장 포함)을 고치라고 돌려주면 요청한 부분만 바꾼다는 규칙과 부딪친다.
  */
-export function finalChecks(t: ReportTemplate, doc: BlockDoc, photoKeys: string[], opts: { changed?: Set<string> } = {}): string[] {
+export function finalChecks(t: ReportTemplate, doc: BlockDoc, opts: { changed?: Set<string> } = {}): string[] {
   const touched = (id: string) => !opts.changed || opts.changed.has(id);
   const out = opts.changed ? [] : missingSections(t, doc).map((h) => `필수 섹션이 없습니다: ${h}`);
-
-  const where = new Map<number, string[]>();
-  for (const b of doc.blocks) {
-    for (const k of new Set(photoKeysOf(b.html) ?? [])) {
-      const no = photoKeys.indexOf(k) + 1;
-      if (no > 0) where.set(no, [...(where.get(no) ?? []), b.id]);
-    }
-  }
-  for (const [no, ids] of [...where].sort((a, b) => a[0] - b[0])) {
-    if (ids.length > 1 && ids.some(touched)) out.push(`사진 ${no}이(가) 여러 사진 자리(${ids.join(", ")})에 있습니다. 한 자리에만 둘 것.`);
-  }
 
   const rule = doc.blocks.filter((b) => touched(b.id)).flatMap((b) => checkBlock(b.html).map((s) => `[${b.id}] ${s}`));
   out.push(...rule.slice(0, FINAL_MAX));

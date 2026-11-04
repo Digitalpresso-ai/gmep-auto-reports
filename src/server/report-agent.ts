@@ -34,7 +34,6 @@ export type AgentOptions = {
   followUp?: string;
   images: ModelRequest["images"];
   template: ReportTemplate;
-  photoKeys: string[];
   doc: BlockDoc;
   limits?: { maxTurns?: number; deadlineMs?: number };
   onEvent: (e: AgentEvent) => void;
@@ -141,7 +140,7 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
         return;
       }
       if (t.name === "finish") return void calls.push({ id: t.id, name: "finish", kind: "finish" });
-      const r = applyOp(doc, { name: t.name, input: t.input }, o.photoKeys);
+      const r = applyOp(doc, { name: t.name, input: t.input });
       if (!r.ok) return void calls.push({ id: t.id, name: t.name, kind: "block", ok: false, error: r.error });
       doc = r.doc;
       const html = doc.blocks.find((b) => b.id === r.id)?.html ?? "";
@@ -180,7 +179,7 @@ export async function runReportAgent(o: AgentOptions): Promise<AgentResult> {
     const blocks: Anthropic.Beta.BetaContentBlockParam[] = [];
     let issues: string[] | null = null;
     const check = () => {
-      const list = finalChecks(o.template, s.doc, o.photoKeys, o.mode === "revise" ? { changed: changedIds(o.doc, s.doc) } : {});
+      const list = finalChecks(o.template, s.doc, o.mode === "revise" ? { changed: changedIds(o.doc, s.doc) } : {});
       if (list.length) o.onEvent({ type: "issues", list });
       return list;
     };

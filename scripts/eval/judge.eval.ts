@@ -9,7 +9,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { it } from "vitest";
-import { htmlWithPhotoNumbers } from "@/server/domain/prompt";
 import { OUT_ROOT } from "./fixture";
 import { summarizeJudges, type JudgeResult } from "./summary";
 
@@ -20,12 +19,11 @@ const JUDGE_MODEL = process.env.EVAL_JUDGE_MODEL ?? "opus";
 
 const CRITERIA = {
   bullet_style: "모든 문장이 개조식(명사형·체언 종결)인가. 서술형 어미(~습니다, ~했다, ~함.)나 길게 늘어진 문장이 없는가",
-  factuality: "입력 자료(기안문·일정·교육자료·특이사항·사진 설명)에 없는 사실(미팅 상대, 계약, 수치, 연사 발언, 시간)을 지어내지 않았는가. 사실과 해석을 구분했는가",
+  factuality: "입력 자료(기안문·일정·교육자료·특이사항)에 없는 사실(미팅 상대, 계약, 수치, 연사 발언, 시간)을 지어내지 않았는가. 사실과 해석을 구분했는가",
   schedule: "일정·수행 내용이 그날 실제 일정(운영사 자료)과 맞고, 이 회사가 무엇을 했는지 구체적으로 적혔는가",
   education: "세부 교육 내용이 세션별 핵심을 자료에 충실하게(통계·사례 포함) 정리했는가. 분량과 밀도가 적절한가",
   insights: "시사점이 이 회사의 사업·제품 관점의 구체적 인사이트인가(일반론 아님). 향후 계획이 실행 가능한 후속 조치인가",
   evidence_fit: "정부지원사업 여비 증빙용 일일 출장 결과보고서로 바로 제출할 수 있는 구성·톤·완결성인가(기본정보·계획 대비·첨부 포함)",
-  photo_placement: "사진이 사진 설명에 맞는 섹션 옆에 배치되었는가. 사진 설명 정보가 없거나 배치 정보가 없으면 1점",
 } as const;
 
 const schema = {
@@ -85,30 +83,26 @@ function judgePrompt(dir: string): string | null {
   const meta = read("meta.json") ? JSON.parse(read("meta.json")) : {};
   const html = read("report.html");
   const report = meta.mode
-    ? html && { label: "보고서 HTML — [사진 N]은 그 자리에 놓인 사진 번호", body: htmlWithPhotoNumbers(html, meta.photoKeys ?? []) }
+    ? html && { label: "보고서 HTML", body: html }
     : read("report.json") && { label: "보고서 JSON", body: read("report.json") };
   // 파싱 실패로 보고서가 없는 실행은 채점하지 않는다(meta.parseOk로 따로 집계된다)
   if (!report) return null;
-  const placement = read("placement.json");
   // 생성 프롬프트의 작성 규칙은 라운드마다 바뀌므로 채점에는 넘기지 않는다. 기준은 지시서(CRITERIA)뿐이고, 자료 부분만 잘라 넘긴다.
   const full = read("prompt.txt");
   const sources = full.slice(full.indexOf("[회사 정보]"), full.lastIndexOf("[출력]")).trim();
   return `당신은 정부지원사업 전담기관의 출장보고서 검토자입니다. 아래 [입력 자료]만을 근거로 AI가 만든 [보고서]를 채점하세요.
 각 기준은 1~5점(5=그대로 제출 가능, 3=손볼 곳 여러 개, 1=사용 불가). 근거 없는 칭찬 없이, 감점 이유를 보고서 문장 인용으로 적으세요.
 채점 기준은 아래 [채점 기준]뿐입니다. 기준에 없는 형식 취향(항목 길이, 나열 개수 등)으로 감점하지 마세요.
-violations에는 입력 자료에 없는 사실·서술형 어미·잘못된 사진 배치를 인용과 함께 적으세요. improvements에는 보고서를 더 좋게 만들 구체적 개선점을 우선순위 순으로 적으세요.
+violations에는 입력 자료에 없는 사실·서술형 어미를 인용과 함께 적으세요. improvements에는 보고서를 더 좋게 만들 구체적 개선점을 우선순위 순으로 적으세요.
 
 [채점 기준]
 ${Object.entries(CRITERIA).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 
-[입력 자료 — 회사 정보·보고 일자·기안문·일정·교육자료·특이사항·사진 설명]
+[입력 자료 — 회사 정보·보고 일자·기안문·일정·교육자료·특이사항]
 ${sources}
 
 [${report.label}]
-${report.body}
-
-[사진 배치 — 사진 번호·사진 설명·배치된 위치]
-${placement || "(배치 정보 없음: 모든 사진이 마지막 '참여 사진' 절에 나열됨)"}`;
+${report.body}`;
 }
 
 it(`채점 ${ROUND}`, async () => {

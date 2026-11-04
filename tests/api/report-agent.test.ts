@@ -221,7 +221,7 @@ async function run(scripts: Script[], over: Partial<Parameters<typeof import("@/
   model.scripts = scripts;
   model.requests = [];
   const events: Record<string, unknown>[] = [];
-  const result = await runReportAgent({ model: "claude-sonnet-5-5", prompt: "P", images: [], template, photoKeys: [], doc: empty, mode: "generate", onEvent: (e) => events.push(e), ...over });
+  const result = await runReportAgent({ model: "claude-sonnet-5-5", prompt: "P", images: [], template, doc: empty, mode: "generate", onEvent: (e) => events.push(e), ...over });
   return { result, events, requests: model.requests };
 }
 
@@ -451,7 +451,7 @@ describe("runReportAgent", () => {
     observe.finalChecks = finalChecks;
     const doc: BlockDoc = { blocks: [{ id: "b1", html: "<p>회사가 쓴 문장</p>" }, { id: "b2", html: "<p>원래</p>" }] };
     await run([{ blocks: [tu("r", "replace_paragraph", { id: "b2", text: "고침" }), finish("f")], stopReason: "tool_use" }], { doc, mode: "revise", followUp: "고쳐 줘" });
-    expect(finalChecks.mock.calls[0][3]).toEqual({ changed: new Set(["b2"]) });
+    expect(finalChecks.mock.calls[0][2]).toEqual({ changed: new Set(["b2"]) });
   });
 
   it("회사가 나머지 사진 섹션을 지운 문서를 고치면 그 섹션을 다시 만들지 않는다", async () => {

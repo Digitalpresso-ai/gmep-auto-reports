@@ -108,25 +108,23 @@ describe("finalChecks", () => {
       { heading: "다음 주 계획", required: true, numbered: true, guidance: [] },
     ],
   };
-  const keys = ["shared:a", "company:b", "company:c"];
 
   it("문제없는 문서는 빈 배열이다", () => {
     const doc = parseBlocks(`<h1>주간 보고</h1><h2>1. 요약</h2>${ul("시장 조사 완료")}${photosHtml(["shared:a"])}<h2>2. 다음 주 계획</h2>${ul("파트너 미팅 준비")}${photosHtml(["company:b"])}`);
-    expect(finalChecks(tpl, doc, keys)).toEqual([]);
+    expect(finalChecks(tpl, doc)).toEqual([]);
   });
 
-  it("빠진 필수 섹션, 여러 자리에 들어간 사진 번호, 블록별 규칙 위반을 블록 id와 함께 알린다", () => {
+  it("빠진 필수 섹션과 블록별 규칙 위반을 블록 id와 함께 알린다", () => {
     const doc = parseBlocks(`<h1>주간 보고</h1><h2>1. 요약</h2>${ul("시장 조사를 완료했습니다")}${photosHtml(["shared:a", "company:c"])}${photosHtml(["company:c"])}`);
-    const issues = finalChecks(tpl, doc, keys);
+    const issues = finalChecks(tpl, doc);
     expect(issues.some((s) => s.includes("다음 주 계획"))).toBe(true);
-    expect(issues.some((s) => s.includes("사진 3") && s.includes("b4") && s.includes("b5"))).toBe(true);
-    expect(issues.some((s) => s.includes("사진 1"))).toBe(false);
+    expect(issues.some((s) => s.includes("사진"))).toBe(false);
     expect(issues.some((s) => s.includes("b3") && s.includes("서술형"))).toBe(true);
   });
 
   it("수정에서는 바뀐 블록만 검사하고 빠진 필수 섹션은 알리지 않는다", () => {
     const doc = parseBlocks("<p>회사가 쓴 문장을 확인함</p><p>새로 쓴 문장을 검토함</p>");
-    const issues = finalChecks(GMEP_DAILY, doc, [], { changed: new Set(["b2"]) });
+    const issues = finalChecks(GMEP_DAILY, doc, { changed: new Set(["b2"]) });
     expect(issues).toHaveLength(1);
     expect(issues[0]).toContain("[b2]");
   });
@@ -134,7 +132,7 @@ describe("finalChecks", () => {
   it("규칙 위반이 10개를 넘으면 10개만 보이고 나머지 건수를 알린다", () => {
     const items = Array.from({ length: 13 }, (_, n) => `항목 ${n + 1} 확인함`);
     const doc = parseBlocks(`<h1>주간 보고</h1><h2>1. 요약</h2>${ul(...items)}<h2>2. 다음 주 계획</h2>${ul("준비")}`);
-    const issues = finalChecks(tpl, doc, keys);
+    const issues = finalChecks(tpl, doc);
     expect(issues.filter((s) => s.includes("[b3]"))).toHaveLength(10);
     expect(issues.some((s) => s.includes("3건"))).toBe(true);
   });
