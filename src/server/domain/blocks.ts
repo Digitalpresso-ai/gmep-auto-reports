@@ -58,6 +58,18 @@ export function headingsOf(doc: BlockDoc): { id: string; level: number; text: st
   });
 }
 
+/** 키 없는 사진 자리(<div class="photos">)인지. photo-layout.ts의 assignPhotos는 이 자리 중 마지막에 나머지 사진을 넣는다. */
+export function isRestPhotos(block: Block): boolean {
+  const el = firstElement(block.html);
+  return Boolean(el && el.type === "tag" && isPhotos(el) && el.attribs["data-photos"] == null);
+}
+
+/** at번째 위치(0이면 맨 앞)에 HTML 블록을 넣는다. id는 기존 최대 번호 다음이다. */
+export function insertBlock(doc: BlockDoc, at: number, html: string): { doc: BlockDoc; id: string } {
+  const block = { id: nextId(doc), html };
+  return { doc: { blocks: [...doc.blocks.slice(0, at), block, ...doc.blocks.slice(at)] }, id: block.id };
+}
+
 // ---------- 블록 → HTML ----------
 
 // cleanReportHtml(sanitize-html)은 텍스트의 &,<,>만 이스케이프한다. 따옴표까지 바꾸면 정리 뒤 바이트가 달라진다.
@@ -178,8 +190,7 @@ export function applyOp(doc: BlockDoc, op: BlockOp, photoKeys: string[]): ApplyR
     if (i < 0) return noBlock(after);
     at = i + 1;
   }
-  const block = { id: nextId(doc), html: built.html };
-  return { ok: true, doc: { blocks: [...doc.blocks.slice(0, at), block, ...doc.blocks.slice(at)] }, id: block.id };
+  return { ok: true, ...insertBlock(doc, at, built.html) };
 }
 
 // ---------- 수정 프롬프트 ----------
