@@ -12,6 +12,16 @@ describe("checkBlock", () => {
     expect(checkBlock('<table class="kv"><tr><td>일자</td><td>2026. 11. 2.(월)</td></tr></table>')).toEqual([]);
   });
 
+  // 실제 11/2 자료 평가(k1)에서 나온 오판: 참석자 칸의 직함 괄호, '임'으로 끝나는 외래어 명사
+  it("괄호로 끝나는 이름·직함과 '임'으로 끝나는 외래어 명사는 서술형으로 보지 않는다", () => {
+    expect(checkBlock('<table class="kv"><tr><td>참석자</td><td>홍길동(대표), 김철수(주임)</td></tr></table>')).toEqual([]);
+    expect(checkBlock(ul("경쟁사·자사 경쟁 구분 프레임", "B2B 게임 시장", "리드 타임"))).toEqual([]);
+  });
+
+  it("표 칸의 서술형 종결은 계속 위반으로 알린다", () => {
+    expect(checkBlock('<table class="kv"><tr><td>계획 대비</td><td>계획대로 이행함</td></tr></table>').join()).toContain("서술형");
+  });
+
   it("80자 이내 경계값은 통과하고 81자는 앞 20자를 보여 위반으로 알린다", () => {
     expect(checkBlock(ul("가".repeat(80)))).toEqual([]);
     const long = "가나다라마바사아자차카타파하거너더러머버" + "서".repeat(61);
