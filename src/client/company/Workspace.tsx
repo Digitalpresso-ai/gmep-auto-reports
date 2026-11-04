@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { assignPhotos, parsePhotoKeys, photoKey } from "@/lib/photo-layout";
-import { ApiError, apiStream, api, errorText, fmtDate, kstToday } from "../api";
+import { ApiError, apiStream, api, errorText, fmtDate, berlinToday } from "../api";
 import { useDialog } from "../dialog";
 import { imageForm, toJpeg } from "../files";
 import type { DayView, PhotoRef, Profile, ReportDoc, Revision, Usage } from "./types";
@@ -15,7 +15,7 @@ const sameRef = (a: PhotoRef, b: PhotoRef) => a.source === b.source && a.id === 
 // H0 작성 화면 → E1/E2 입력 → G1 생성 중 / G2 실패 / Q1 한도 소진 → R1 미리보기·편집 / R2 저장 실패 → V1 AI 수정 → W1 Word
 // 휴대폰에서 한 화면에 한 가지 일만 하도록 입력 화면과 수정 대화 화면을 나누고, 보고서 본문은 문서 시트를 열어야 보인다.
 export function Workspace({ profile }: { profile: Profile }) {
-  const [date, setDate] = useState(kstToday);
+  const [date, setDate] = useState(berlinToday);
   const [day, setDay] = useState<DayView | null>(null);
   const [loadError, setLoadError] = useState("");
   const ui = useDialog();

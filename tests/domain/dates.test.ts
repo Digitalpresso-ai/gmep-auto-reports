@@ -38,3 +38,14 @@ describe("AI-9·AI-10 사용 횟수는 독일 시간 자정에 다시 센다", (
     expect(berlinMonthStart(new Date("2026-11-03T00:00:00Z")).toISOString()).toBe("2026-10-31T23:00:00.000Z");
   });
 });
+
+describe("FUNC-2 화면의 보고 일자 기본값은 독일 날짜", () => {
+  it("독일 자정 전후로 날짜가 바뀌고 한국 자정에는 바뀌지 않는다", async () => {
+    const { berlinToday } = await import("@/client/api");
+    expect(berlinToday(new Date("2026-11-04T15:30:00Z"))).toBe("2026-11-04");
+    expect(berlinToday(new Date("2026-11-04T22:59:59Z"))).toBe("2026-11-04");
+    expect(berlinToday(new Date("2026-11-04T23:00:00Z"))).toBe("2026-11-05");
+    expect(berlinToday(new Date("2026-07-01T21:59:59Z"))).toBe("2026-07-01");
+    expect(berlinToday(new Date("2026-07-01T22:00:00Z"))).toBe("2026-07-02");
+  });
+});
