@@ -21,6 +21,12 @@ vi.mock("@/server/ai", async (importOriginal) => ({
   callModel: (r: ModelRequest) => callModel(r),
   streamModel: (r: StreamRequest, onToolUse?: OnToolUse) => streamModel(r, onToolUse),
 }));
+// 응답 뒤에도 이어지는 생성 작업(after)은 모아 두었다가 테스트가 기다린다
+const background: (() => Promise<void>)[] = [];
+vi.mock("@/server/background", () => ({ afterResponse: (fn: () => Promise<void>) => void background.push(fn) }));
+const runBackground = async () => {
+  while (background.length) await background.shift()!();
+};
 type RunAgent = typeof import("@/server/report-agent").runReportAgent;
 // 루프는 실제로 돌리되, 넘긴 인자를 확인하거나 루프 결과를 직접 주입할 수 있게 감싼다
 const agent = vi.hoisted(() => ({ real: null as RunAgent | null }));
@@ -660,5 +666,180 @@ describe("FUNC-10 AI 수정", () => {
         await t.sql.unsafe("drop trigger fail_revision on report_revisions; drop function fail_revision()");
       }
     });
+  });
+});
+
+describe("생성 중 미리보기 스트림(NDJSON)", () => {
+  const d = "2026-11-10";
+  let c: { id: string; cookie: string };
+  const full = JSON.stringify({
+    title: "스트림 보고서",
+    basic: [["일자", "2026. 11. 10.(화)"]],
+    schedule: [["09:30", "온보딩", "참석"]],
+    education: [],
+    achievements: [{ t: "현지 거점 확보", sub: ["코워킹 이용"] }],
+    special: [],
+    insights: [{ t: "현지 수요 확인", sub: ["근거: 강연"] }],
+    plans: ["후속 미팅 준비"],
+    attachments: ["강연 자료"],
+    photos: [],
+  });
+  type Line = { type: string; [k: string]: unknown };
+  const generateStream = async (cookie: string, body: unknown = {}, dd = d) => {
+    const r = request("POST", "/x", { cookie, body });
+    r.headers.set("accept", "application/x-ndjson");
+    return (await import("@/app/api/days/[date]/report/route")).POST(r, params({ date: dd }));
+  };
+  const lines = async (res: Response): Promise<Line[]> => (await res.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  /** 텍스트를 몇 글자씩 onText로 흘린 뒤 결과를 돌려주는 가짜 모델. gate를 주면 절반을 흘린 뒤 그 약속을 기다린다. */
+  const streamed =
+    (text: string, gate?: Promise<void>) =>
+    async (r: ModelRequest): Promise<ModelResult> => {
+      for (let i = 7; i < text.length + 7; i += 7) {
+        r.onText?.(text.slice(0, i));
+        if (gate && i < text.length / 2 && i + 7 >= text.length / 2) await gate;
+      }
+      return reply(text);
+    };
+  const stored = async (companyId: string, dd = d) =>
+    (await t.sql<{ title: string; body_html: string; updated_at: Date }[]>`select title, body_html, updated_at from reports where company_id = ${companyId} and report_date = ${dd}`)[0];
+  const remaining = async (cookie: string) =>
+    (await (await (await import("@/app/api/days/[date]/route")).GET(request("GET", "/x", { cookie }), params({ date: d }))).json()).usage.generateRemaining;
+  const withoutPhotos = (html: string) => html.replace(/<div class="photos"[^>]*><\/div>/g, "").replace(/<h2>\d+\. 참여 사진<\/h2>/, "");
+
+  beforeAll(async () => {
+    const id = await companyWithPassword(t.sql, "주식회사 스트림", "s-password");
+    c = { id, cookie: await loginCookie(id, "s-password") };
+  });
+  afterEach(runBackground);
+
+  it("start → 섹션이 늘어나는 partial → done 순서로 보내고, done의 보고서는 저장본과 같다", async () => {
+    callModel.mockImplementationOnce(streamed(full));
+    const res = await generateStream(c.cookie);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/x-ndjson; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-cache, no-transform");
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
+    const ls = await lines(res);
+    expect(ls[0].type).toBe("start");
+    expect(String(ls[0].pad).length).toBeGreaterThanOrEqual(1024);
+    expect(ls.at(-1)!.type).toBe("done");
+    const partials = ls.slice(1, -1);
+    expect(partials.every((l) => l.type === "partial")).toBe(true);
+    const htmls = partials.map((l) => String(l.html));
+    expect(htmls[0]).toBe("<h1>스트림 보고서</h1>");
+    for (let i = 1; i < htmls.length; i++) {
+      expect(htmls[i].startsWith(htmls[i - 1])).toBe(true);
+      expect(htmls[i].length).toBeGreaterThan(htmls[i - 1].length);
+    }
+    const done = ls.at(-1) as unknown as { report: { title: string; bodyHtml: string; updatedAt: string }; usage: { generateRemaining: number } };
+    const row = await stored(c.id);
+    expect(done.report).toEqual({ title: row.title, bodyHtml: row.body_html, updatedAt: row.updated_at.toISOString() });
+    expect(htmls.at(-1)).toBe(withoutPhotos(row.body_html));
+    expect(htmls.at(-1)).toContain("<h2>붙임</h2>");
+    expect(done.usage.generateRemaining).toBe(4);
+    expect((await t.sql`select 1 from ai_inflight where company_id = ${c.id}`).length).toBe(0);
+  });
+
+  it("Accept가 없으면 지금처럼 JSON으로 답한다", async () => {
+    callModel.mockImplementationOnce(streamed(full));
+    const res = await generate(c.cookie, { overwrite: true }, d);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect((await res.json()).report.title).toBe("스트림 보고서");
+    expect(callModel.mock.calls[0][0].onText).toBeUndefined();
+  });
+
+  it("사전 검사 실패는 스트림을 열지 않고 JSON 오류로 답한다", async () => {
+    const exists = await generateStream(c.cookie);
+    expect(exists.status).toBe(409);
+    expect(exists.headers.get("content-type")).toContain("application/json");
+    expect((await exists.json()).code).toBe("report_exists");
+    await t.sql`update companies set daily_generate_limit = 0 where id = ${c.id}`;
+    try {
+      const limited = await generateStream(c.cookie, { overwrite: true });
+      expect(limited.status).toBe(429);
+      expect((await limited.json()).code).toBe("limit_reached");
+    } finally {
+      await t.sql`update companies set daily_generate_limit = 5 where id = ${c.id}`;
+    }
+    await t.sql`insert into ai_inflight (company_id) values (${c.id})`;
+    try {
+      const busy = await generateStream(c.cookie, { overwrite: true });
+      expect(busy.status).toBe(409);
+      expect((await busy.json()).code).toBe("in_progress");
+    } finally {
+      await t.sql`delete from ai_inflight where company_id = ${c.id}`;
+    }
+    expect((await generateStream(c.cookie, {}, "2026-13-01")).status).toBe(400);
+    expect((await generateStream("gmep_session=nope")).status).toBe(401);
+    expect(callModel).not.toHaveBeenCalled();
+  });
+
+  it("첫 응답을 읽지 못하면 reset을 보내고 다시 받은 결과로 끝낸다", async () => {
+    const cut = '{"title":"잘린 보고서","basic":[["일자","x"]],"schedule":[["09';
+    callModel.mockImplementationOnce(streamed(cut)).mockImplementationOnce(streamed(full));
+    const ls = await lines(await generateStream(c.cookie, { overwrite: true }));
+    const types = ls.map((l) => l.type);
+    const reset = types.indexOf("reset");
+    expect(types[0]).toBe("start");
+    expect(reset).toBeGreaterThan(1);
+    expect(types.slice(1, reset).every((x) => x === "partial")).toBe(true);
+    expect(types.filter((x) => x === "reset")).toHaveLength(1);
+    expect(types.at(-1)).toBe("done");
+    const after = ls.slice(reset + 1, -1);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.some((l) => String(l.html).includes("잘린 보고서"))).toBe(false);
+    expect((ls.at(-1) as unknown as { report: { title: string } }).report.title).toBe("스트림 보고서");
+  });
+
+  it("두 번 다 읽지 못하면 error 줄로 끝내고 보고서와 남은 횟수는 그대로다", async () => {
+    const before = await stored(c.id);
+    const left = await remaining(c.cookie);
+    callModel.mockImplementationOnce(streamed("설명만 있음")).mockImplementationOnce(streamed("또 설명"));
+    const ls = await lines(await generateStream(c.cookie, { overwrite: true }));
+    expect(ls.map((l) => l.type)).toEqual(["start", "reset", "error"]);
+    expect(ls.at(-1)).toEqual({ type: "error", code: "ai_parse_failed", message: "보고서 형식을 만들지 못했습니다. 다시 시도해 주세요(횟수는 차감되지 않았습니다)" });
+    expect(await stored(c.id)).toEqual(before);
+    expect(await remaining(c.cookie)).toBe(left);
+    expect((await t.sql`select 1 from ai_inflight where company_id = ${c.id}`).length).toBe(0);
+  });
+
+  it("AI 호출이 실패하면 ai_failed error 줄을 보낸다", async () => {
+    callModel.mockRejectedValueOnce(new Error("overloaded"));
+    const ls = await lines(await generateStream(c.cookie, { overwrite: true }));
+    expect(ls.at(-1)).toEqual({ type: "error", code: "ai_failed", message: "AI 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요(횟수는 차감되지 않았습니다)" });
+  });
+
+  it("브라우저가 스트림을 끊어도 생성·저장·사용량 기록·진행 기록 해제를 끝까지 한다", async () => {
+    const dd = "2026-11-11";
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    callModel.mockImplementationOnce(streamed(full, gate));
+    const usageBefore = (await usageRows(c.id)).length;
+    const res = await generateStream(c.cookie, {}, dd);
+    const reader = res.body!.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    expect(JSON.parse(first.split("\n")[0]).type).toBe("start");
+    await reader.cancel();
+    release();
+    expect(background).toHaveLength(1);
+    await runBackground();
+    expect((await stored(c.id, dd)).title).toBe("스트림 보고서");
+    const rows = await usageRows(c.id);
+    expect(rows).toHaveLength(usageBefore + 1);
+    expect(rows.at(-1)).toMatchObject({ kind: "generate", success: true });
+    expect((await t.sql`select 1 from ai_inflight where company_id = ${c.id}`).length).toBe(0);
+  });
+
+  it("다른 회사 세션으로 만들면 그 회사 보고서만 생기고 이 회사 보고서는 바뀌지 않는다", async () => {
+    const mine = await stored(c.id);
+    const otherId = await companyWithPassword(t.sql, "주식회사 다른곳", "o-password");
+    const other = await loginCookie(otherId, "o-password");
+    callModel.mockImplementationOnce(streamed(JSON.stringify({ title: "다른 회사 보고서" })));
+    const ls = await lines(await generateStream(other));
+    expect(ls.at(-1)!.type).toBe("done");
+    expect((await stored(otherId)).title).toBe("다른 회사 보고서");
+    expect(await stored(c.id)).toEqual(mine);
   });
 });

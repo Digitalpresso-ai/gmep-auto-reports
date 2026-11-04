@@ -1,11 +1,12 @@
 import "server-only";
+import { partialParse } from "@anthropic-ai/sdk/_vendor/partial-json-parser/parser";
 import { parseDocument } from "htmlparser2";
 import { callModel, ModelStreamError, type ModelRequest } from "./ai";
 import { db } from "./db";
 import { buildAgentPrompt, buildAgentRevision } from "./domain/agent";
 import { numberedForModel, parseBlocks, type BlockDoc } from "./domain/blocks";
 import { buildPrompt, type Material, type PromptInput } from "./domain/prompt";
-import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, type Report } from "./domain/report";
+import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderPartialReportHtml, renderReportHtml, type Report } from "./domain/report";
 import { photoKey } from "@/lib/photo-layout";
 import { canGenerate, canRevise, usageView, type UsageView } from "./domain/usage";
 import { GMEP_DAILY } from "./domain/template";
@@ -26,7 +27,13 @@ const MIN_AGENT_MS = 30_000;
 type ReportView = { title: string; bodyHtml: string; updatedAt: string };
 type AiFailure = { kind: "limit_reached" | "in_progress" | "ai_failed" | "ai_parse_failed" };
 
-export type GenerateOutcome = { kind: "ok"; report: ReportView; usage: UsageView } | { kind: "report_exists" } | AiFailure;
+/** 생성 실행 결과. 한도·진행 중 검사는 시작 전에 끝나므로 AI·저장 결과만 남는다. */
+export type GenerateResult = { kind: "ok"; report: ReportView; usage: UsageView } | { kind: "ai_failed" | "ai_parse_failed" };
+/** 생성 중 미리보기 이벤트. partial.html은 지금까지 끝난 섹션만 그린 본문 전체이고, reset은 재시도로 앞의 미리보기를 버린다는 뜻이다. */
+export type GenerateEvent = { type: "partial"; html: string } | { type: "reset" };
+export type GenerationStart =
+  | { kind: "ready"; run: (onEvent?: (e: GenerateEvent) => void) => Promise<GenerateResult> }
+  | { kind: "report_exists" | "limit_reached" | "in_progress" };
 
 export type Revision = { request: string; createdAt: string };
 export type ReviseOutcome = { kind: "ok"; report: ReportView; usage: UsageView; revisions: Revision[] } | { kind: "no_report" } | AiFailure;
@@ -125,12 +132,55 @@ function mediaTypeOf(path: string): ModelRequest["images"][number]["mediaType"] 
   return "image/jpeg";
 }
 
+/**
+ * 스트림으로 받는 텍스트에서 끝난 최상위 키를 찾아 미리보기를 보낸다. 키는 다음 키가 나타나면 끝난 것으로 본다.
+ * 끝난 키가 늘고 그린 결과가 달라질 때만 보낸다(빈 섹션은 같은 HTML이다).
+ */
+function previewer(onEvent: (e: GenerateEvent) => void) {
+  let doneCount = 0;
+  let last = "";
+  const show = (v: Record<string, unknown>, done: string[]) => {
+    if (done.length <= doneCount) return;
+    doneCount = done.length;
+    const html = renderPartialReportHtml(v, done);
+    if (html && html !== last) {
+      last = html;
+      onEvent({ type: "partial", html });
+    }
+  };
+  return {
+    onText(snapshot: string) {
+      const start = snapshot.indexOf("{");
+      if (start < 0) return;
+      let v: unknown;
+      try {
+        v = partialParse(snapshot.slice(start));
+      } catch {
+        return;
+      }
+      if (!v || typeof v !== "object" || Array.isArray(v)) return;
+      show(v as Record<string, unknown>, Object.keys(v).slice(0, -1));
+    },
+    /** 스트림이 끝나 마지막 키까지 끝났다. */
+    finish(full: Record<string, unknown>) {
+      show(full, Object.keys(full));
+    },
+  };
+}
+
 // 생성 전용. 응답이 JSON이 아니면 한 번만 다시 부른다(AI-5). 실패한 호출도 토큰은 썼으므로 기록하되 횟수에서는 빼지 않는다(AI-9).
-async function callForReport(companyId: string, kind: "generate", req: ModelRequest): Promise<Report | "ai_failed" | "ai_parse_failed"> {
+async function callForReport(
+  companyId: string,
+  kind: "generate",
+  req: ModelRequest,
+  onEvent?: (e: GenerateEvent) => void,
+): Promise<Report | "ai_failed" | "ai_parse_failed"> {
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) onEvent?.({ type: "reset" });
+    const preview = onEvent ? previewer(onEvent) : null;
     let result;
     try {
-      result = await callModel(req);
+      result = await callModel(preview ? { ...req, onText: preview.onText } : req);
     } catch (e) {
       console.error("AI 호출 실패", { companyId, kind, error: e instanceof Error ? e.message : String(e) });
       await recordUsage({ companyId, kind, model: req.model, inputTokens: 0, outputTokens: 0, success: false });
@@ -147,20 +197,31 @@ async function callForReport(companyId: string, kind: "generate", req: ModelRequ
       cacheWriteTokens: result.cacheWriteTokens,
       success: parsed !== null,
     });
-    if (parsed) return normalizeReport(parsed);
+    if (parsed) {
+      preview?.finish(parsed);
+      return normalizeReport(parsed);
+    }
   }
   return "ai_parse_failed";
 }
 
-export async function generateReport(companyId: string, date: string, overwrite: boolean): Promise<GenerateOutcome> {
-  const sql = db();
-  const [existing] = await sql`select 1 from reports where company_id = ${companyId} and report_date = ${date}`;
+/**
+ * 생성 전 검사를 하고 진행 기록을 잡는다. ready를 받으면 반드시 run을 불러야 진행 기록이 풀린다.
+ * 검사와 실행을 나눈 이유: 스트림 응답은 검사 실패를 JSON 오류로 답한 뒤에만 스트림을 연다.
+ */
+export async function startGeneration(companyId: string, date: string, overwrite: boolean): Promise<GenerationStart> {
+  const [existing] = await db()`select 1 from reports where company_id = ${companyId} and report_date = ${date}`;
   if (existing && !overwrite) return { kind: "report_exists" };
   if (!canGenerate(await usageCounts(companyId))) return { kind: "limit_reached" };
   if (!(await reserve(companyId))) return { kind: "in_progress" };
+  return { kind: "ready", run: (onEvent) => runGeneration(companyId, date, onEvent) };
+}
+
+async function runGeneration(companyId: string, date: string, onEvent?: (e: GenerateEvent) => void): Promise<GenerateResult> {
+  const sql = db();
   try {
     const req = await promptRequest(companyId, date);
-    const report = await callForReport(companyId, "generate", req);
+    const report = await callForReport(companyId, "generate", req, onEvent);
     if (typeof report === "string") return { kind: report };
     const bodyHtml = renderReportHtml(report, req.photoKeys);
     const draft = await getDraft(companyId, date);
