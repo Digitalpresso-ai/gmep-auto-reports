@@ -19,6 +19,8 @@ export type ModelRequest = {
   cacheTtl?: "5m" | "1h";
   /** prompt 뒤에 붙이는 캐시 밖의 지시. AI 수정 요청처럼 호출마다 바뀌는 내용이다. */
   followUp?: string;
+  /** 주면 응답을 스트림으로 받아 텍스트 조각마다 지금까지 받은 텍스트 전체를 넘긴다. 반환값은 스트림 없이 받을 때와 같다. */
+  onText?: (snapshot: string) => void;
 };
 /** inputTokens는 캐시 읽기·쓰기까지 합친 입력 토큰이다. */
 export type ModelResult = {
@@ -41,17 +43,22 @@ export function userContent(req: ModelRequest): Anthropic.Beta.BetaContentBlockP
   ];
 }
 
-export async function callModel(req: ModelRequest): Promise<ModelResult> {
-  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: TIMEOUT_MS, maxRetries: 0 });
-  const response = await client.beta.messages.create({
+function modelParams(req: ModelRequest) {
+  return {
     model: req.model,
     max_tokens: req.maxTokens ?? MAX_TOKENS,
     output_config: { effort: req.effort ?? "medium", ...(req.jsonSchema ? { format: { type: "json_schema" as const, schema: req.jsonSchema } } : {}) },
     // 안전 분류기가 거절하면 서버가 다른 모델로 다시 시도한다
     betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    messages: [{ role: "user", content: userContent(req) }],
-  });
+    fallbacks: "default" as const,
+    messages: [{ role: "user" as const, content: userContent(req) }],
+  };
+}
+
+export async function callModel(req: ModelRequest): Promise<ModelResult> {
+  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: TIMEOUT_MS, maxRetries: 0 });
+  if (req.onText) return streamText(client, req, req.onText);
+  const response = await client.beta.messages.create(modelParams(req));
   const cacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
   const cacheWriteTokens = response.usage.cache_creation_input_tokens ?? 0;
   const text = response.stop_reason === "refusal" ? "" : response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
@@ -63,6 +70,60 @@ export async function callModel(req: ModelRequest): Promise<ModelResult> {
     stopReason: response.stop_reason,
     cacheReadTokens,
     cacheWriteTokens,
+  };
+}
+
+/**
+ * callModel의 스트림 경로. 텍스트 블록은 스트림 없이 받을 때처럼 순서대로 이어 붙인다(fallback 뒤 모델은 앞 텍스트를 이어 쓴다).
+ * 사용량은 message_start에 입력·캐시가, message_delta에 출력(과 갱신된 입력)이 온다.
+ */
+async function streamText(c: Anthropic, req: ModelRequest, onText: (snapshot: string) => void): Promise<ModelResult> {
+  const stream = await c.beta.messages.create({ ...modelParams(req), stream: true });
+  let text = "";
+  let model = req.model;
+  let stopReason: string | null = null;
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  type Usage = { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
+  const setUsage = (u: Usage) => {
+    input = u.input_tokens ?? input;
+    output = u.output_tokens ?? output;
+    cacheRead = u.cache_read_input_tokens ?? cacheRead;
+    cacheWrite = u.cache_creation_input_tokens ?? cacheWrite;
+  };
+  for await (const ev of stream) {
+    switch (ev.type) {
+      case "message_start":
+        model = ev.message.model;
+        setUsage(ev.message.usage);
+        break;
+      case "content_block_start": {
+        const b = ev.content_block as unknown as AnyBlock;
+        if (b.type === "fallback") model = (b.to as { model: string }).model;
+        break;
+      }
+      case "content_block_delta":
+        if (ev.delta.type === "text_delta") {
+          text += ev.delta.text;
+          onText(text);
+        }
+        break;
+      case "message_delta":
+        stopReason = ev.delta.stop_reason;
+        setUsage(ev.usage);
+        break;
+    }
+  }
+  return {
+    text: stopReason === "refusal" ? "" : text,
+    inputTokens: input + cacheRead + cacheWrite,
+    outputTokens: output,
+    model,
+    stopReason,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
   };
 }
 
