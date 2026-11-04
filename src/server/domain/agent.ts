@@ -1,5 +1,5 @@
-// ReAct 생성 루프(plan_outline → 블록 tool → tool_result 검사 → finish)의 프롬프트와 제어 도구.
-// buildAgentPrompt 결과와 AGENT_TOOLS는 캐시 prefix다. 생성과 수정이 같은 prefix를 쓰므로 호출마다 바뀌는 내용(수정 요청·현재 문서·시각)은
+// ReAct 블록 루프(plan_outline → 블록 tool → tool_result 검사 → finish)의 프롬프트와 제어 도구. 운영에서는 AI 수정에만 쓰고, 생성은 JSON 방식(prompt.ts)이다.
+// buildAgentPrompt 결과와 AGENT_TOOLS는 캐시 prefix다. 같은 보고서의 수정끼리 이 prefix를 같이 쓰므로 호출마다 바뀌는 내용(수정 요청·현재 문서·시각)은
 // buildAgentRevision 쪽에만 둔다. 섹션 구성·섹션별 지침은 양식(template.ts)에서 읽으므로 양식이 바뀌어도 이 파일은 그대로 둔다.
 // 공통 규칙 문구는 prompt.ts의 [작성 규칙]·[추가 규칙] 중 섹션에 매이지 않는 것을 옮겼다. 바꾸면 평가 라운드를 다시 돌린다.
 import { BLOCK_TOOLS } from "./blocks";

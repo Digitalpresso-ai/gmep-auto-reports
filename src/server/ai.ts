@@ -73,7 +73,7 @@ export type ToolUseEvent = { id: string; name: string; input: unknown; error?: s
 
 export type StreamRequest = {
   model: string;
-  /** 첫 user 메시지의 캐시 prefix(규칙·양식·자료). 생성과 수정이 같은 바이트여야 캐시를 같이 쓴다. */
+  /** 첫 user 메시지의 캐시 prefix(규칙·양식·자료). 같은 보고서의 수정끼리 바이트가 같아야 캐시를 읽는다. JSON 생성(callModel)과는 prefix가 달라 캐시를 같이 쓰지 않는다. */
   prompt: string;
   images: ModelRequest["images"];
   /** 첫 user 메시지 끝에 붙는 캐시 밖 지시(수정 요청 등). */
