@@ -1,7 +1,7 @@
 import "server-only";
 import { callModel, type ModelRequest } from "./ai";
 import { db } from "./db";
-import { buildPrompt, buildRevisionFollowUp, htmlWithPhotoNumbers, type Material } from "./domain/prompt";
+import { buildPrompt, buildRevisionFollowUp, htmlWithPhotoNumbers, type Material, type PromptInput } from "./domain/prompt";
 import { REPORT_JSON_SCHEMA, normalizeReport, parseModelJson, renderReportHtml, type Report } from "./domain/report";
 import { photoKey } from "@/lib/photo-layout";
 import { canGenerate, canRevise, usageView, type UsageView } from "./domain/usage";
@@ -42,7 +42,10 @@ async function selectedPhotos(date: string, refs: { source: string; id: string }
   return refs.map((r) => ({ key: photoKey(r), description: r.source === "shared" ? (desc.get(r.id) ?? "") : "" }));
 }
 
-async function promptRequest(companyId: string, date: string): Promise<ModelRequest & { photoKeys: string[] }> {
+type GenerationInput = { input: PromptInput; images: ModelRequest["images"]; photoKeys: string[] };
+
+/** 생성과 AI 수정이 같이 쓰는 입력: 회사 정보·자료·일정 이미지·고른 사진 설명. */
+async function generationInput(companyId: string, date: string): Promise<GenerationInput> {
   const sql = db();
   const [c] = await sql<{ name: string; traveler: string; business_intro: string; proposal_text: string }[]>`
     select name, traveler, business_intro, proposal_text from companies where id = ${companyId}`;
@@ -54,7 +57,7 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
   const draft = await getDraft(companyId, date);
   const photos = await selectedPhotos(date, draft?.selected_photos ?? []);
   const pick = (kind: string): Material[] => materials.filter((m) => m.kind === kind).map((m) => ({ filename: m.filename, text: m.text_content }));
-  const prompt = buildPrompt({
+  const input: PromptInput = {
     companyName: c.name,
     traveler: c.traveler,
     businessIntro: c.business_intro,
@@ -66,18 +69,27 @@ async function promptRequest(companyId: string, date: string): Promise<ModelRequ
     notes: draft?.notes ?? "",
     hasScheduleImages: images.length > 0,
     photos,
-  });
+  };
   // 참여 사진은 보내지 않는다(AI-6). 일정 이미지만 보낸다(FUNC-4).
   const bytes = await Promise.all(images.map((i) => getObject(i.storage_path)));
   return {
+    input,
+    photoKeys: photos.map((p) => p.key),
+    images: bytes.map((b, idx) => ({ mediaType: mediaTypeOf(images[idx].storage_path), base64: Buffer.from(b).toString("base64") })),
+  };
+}
+
+async function promptRequest(companyId: string, date: string): Promise<ModelRequest & { photoKeys: string[] }> {
+  const g = await generationInput(companyId, date);
+  return {
     model: await aiModel(),
-    prompt,
+    prompt: buildPrompt(g.input),
     // 같은 자료로 다시 만들거나 AI로 고칠 때 이 앞부분(일정 이미지·자료·규칙)을 캐시에서 읽는다. 생성 1~3분과
     // 회사가 보고서를 읽고 수정을 요청하기까지의 간격이 5분을 넘기 쉬워 1시간 캐시를 쓴다(AI-13).
     cacheTtl: "1h",
     jsonSchema: REPORT_JSON_SCHEMA,
-    photoKeys: photos.map((p) => p.key),
-    images: bytes.map((b, idx) => ({ mediaType: mediaTypeOf(images[idx].storage_path), base64: Buffer.from(b).toString("base64") })),
+    photoKeys: g.photoKeys,
+    images: g.images,
   };
 }
 
