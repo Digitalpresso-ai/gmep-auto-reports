@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+import { parseBlocks, photosHtml } from "@/server/domain/blocks";
+import { checkBlock, finalChecks, planIssues } from "@/server/domain/observe";
+import { GMEP_DAILY, type ReportTemplate } from "@/server/domain/template";
+
+const ul = (...items: string[]) => `<ul>${items.map((t) => `<li>${t}</li>`).join("")}</ul>`;
+
+describe("checkBlock", () => {
+  it("명사·체언 종결이고 80자 이내인 항목은 통과한다", () => {
+    expect(checkBlock(ul("온보딩 완료", "현지 파트너 확보 필요", "규제 요건 확인", "통계·사례 포함", "11. 3.(화) 피칭 대비"))).toEqual([]);
+    expect(checkBlock("<p>캐나다·르완다 시장 다음 단계 논의</p><p>주요 시장: 캐나다</p><p>참가 기업 모임</p>")).toEqual([]);
+    expect(checkBlock('<table class="kv"><tr><td>일자</td><td>2026. 11. 2.(월)</td></tr></table>')).toEqual([]);
+  });
+
+  it("80자 이내 경계값은 통과하고 81자는 앞 20자를 보여 위반으로 알린다", () => {
+    expect(checkBlock(ul("가".repeat(80)))).toEqual([]);
+    const long = "가나다라마바사아자차카타파하거너더러머버" + "서".repeat(61);
+    const issues = checkBlock(ul(long));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("81자");
+    expect(issues[0]).toContain("가나다라마바사아자차카타파하거너더러머버");
+    expect(issues[0]).not.toContain("서서");
+  });
+
+  it("서술형 종결(~습니다/~했다/~함/~음/~임/~있음/~해야 함)을 위반으로 알린다", () => {
+    for (const t of ["교육에 참석했습니다", "파트너를 만났다", "규제를 확인함", "시장이 넓음", "핵심 고객임", "수요가 있음", "현지화를 검토해야 함", "일정을 확인함."]) {
+      const issues = checkBlock(ul(t));
+      expect(issues, t).toHaveLength(1);
+      expect(issues[0], t).toContain("서술형");
+    }
+  });
+
+  it("빈 li·p·td를 위반으로 알린다", () => {
+    expect(checkBlock(ul("확인", " ")).join()).toContain("빈 항목");
+    expect(checkBlock("<p></p>").join()).toContain("빈 항목");
+    expect(checkBlock("<table><tr><td>09:30</td><td></td></tr></table>").join()).toContain("빈 항목");
+  });
+
+  it("하위 목록이 있는 항목은 상위 문구와 하위 항목을 따로 본다", () => {
+    const html = "<ul><li><strong>시장 이해 확대</strong><ul><li>근거: 구매 구조 설명</li><li>적용: 영업 방식을 바꿔야 함</li></ul></li></ul>";
+    const issues = checkBlock(html);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("적용: 영업 방식");
+  });
+
+  it("제목·사진 자리는 검사하지 않는다", () => {
+    expect(checkBlock("<h2>1. 기본 정보</h2>")).toEqual([]);
+    expect(checkBlock(photosHtml(["shared:a"]))).toEqual([]);
+  });
+});
+
+describe("planIssues", () => {
+  it("양식의 필수 섹션을 모두 계획하면 문제가 없다(번호·공백 차이는 무시)", () => {
+    const plan = GMEP_DAILY.sections.filter((s) => s.required).map((s, n) => ({ heading: `${n + 1}. ${s.heading}` }));
+    expect(planIssues(GMEP_DAILY, plan)).toEqual([]);
+  });
+
+  it("계획에 없는 필수 섹션과 양식에 없는 섹션 이름을 알린다", () => {
+    const issues = planIssues(GMEP_DAILY, [{ heading: "기본 정보" }, { heading: "일정 및 수행 내용" }, { heading: "주요 성과" }, { heading: "총평" }]);
+    expect(issues.some((s) => s.includes("시사점 및 향후 계획") && s.includes("필수"))).toBe(true);
+    expect(issues.some((s) => s.includes("총평") && s.includes("양식에 없는"))).toBe(true);
+    expect(issues.some((s) => s.includes("세부 교육 내용"))).toBe(false);
+  });
+});
+
+describe("finalChecks", () => {
+  const tpl: ReportTemplate = {
+    id: "t",
+    name: "주간 보고",
+    titleGuidance: "제목",
+    sections: [
+      { heading: "요약", required: true, numbered: true, guidance: [] },
+      { heading: "다음 주 계획", required: true, numbered: true, guidance: [] },
+    ],
+  };
+  const keys = ["shared:a", "company:b", "company:c"];
+
+  it("문제없는 문서는 빈 배열이다", () => {
+    const doc = parseBlocks(`<h1>주간 보고</h1><h2>1. 요약</h2>${ul("시장 조사 완료")}${photosHtml(["shared:a"])}<h2>2. 다음 주 계획</h2>${ul("파트너 미팅 준비")}${photosHtml(["company:b"])}`);
+    expect(finalChecks(tpl, doc, keys)).toEqual([]);
+  });
+
+  it("빠진 필수 섹션, 여러 자리에 들어간 사진 번호, 블록별 규칙 위반을 블록 id와 함께 알린다", () => {
+    const doc = parseBlocks(`<h1>주간 보고</h1><h2>1. 요약</h2>${ul("시장 조사를 완료했습니다")}${photosHtml(["shared:a", "company:c"])}${photosHtml(["company:c"])}`);
+    const issues = finalChecks(tpl, doc, keys);
+    expect(issues.some((s) => s.includes("다음 주 계획"))).toBe(true);
+    expect(issues.some((s) => s.includes("사진 3") && s.includes("b4") && s.includes("b5"))).toBe(true);
+    expect(issues.some((s) => s.includes("사진 1"))).toBe(false);
+    expect(issues.some((s) => s.includes("b3") && s.includes("서술형"))).toBe(true);
+  });
+
+  it("규칙 위반이 10개를 넘으면 10개만 보이고 나머지 건수를 알린다", () => {
+    const items = Array.from({ length: 13 }, (_, n) => `항목 ${n + 1} 확인함`);
+    const doc = parseBlocks(`<h1>주간 보고</h1><h2>1. 요약</h2>${ul(...items)}<h2>2. 다음 주 계획</h2>${ul("준비")}`);
+    const issues = finalChecks(tpl, doc, keys);
+    expect(issues.filter((s) => s.includes("[b3]"))).toHaveLength(10);
+    expect(issues.some((s) => s.includes("3건"))).toBe(true);
+  });
+});
